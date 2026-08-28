@@ -23,6 +23,7 @@ env:
   PROJECT: devbox
   DOMAIN: devbox.harungecit.dev
   ZONE: harungecit.dev
+  PAGES_HOST: devbox-6vu.pages.dev   # wrangler assigned this subdomain
 
 jobs:
   deploy:
@@ -64,7 +65,7 @@ jobs:
           [ "$ZONE_ID" != "null" ] || { echo "::error::zone $ZONE not visible to this token"; exit 1; }
           if ! api "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$DOMAIN" | jq -e '.result | length > 0' >/dev/null; then
             api -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
-              --data "{\"type\":\"CNAME\",\"name\":\"$DOMAIN\",\"content\":\"$PROJECT.pages.dev\",\"proxied\":true,\"ttl\":1,\"comment\":\"DevBox website (Cloudflare Pages)\"}" | jq -e .success >/dev/null
-            echo "created CNAME $DOMAIN → $PROJECT.pages.dev"
+              --data "{\"type\":\"CNAME\",\"name\":\"$DOMAIN\",\"content\":\"$PAGES_HOST\",\"proxied\":true,\"ttl\":1,\"comment\":\"DevBox website (Cloudflare Pages)\"}" | jq -e .success >/dev/null
+            echo "created CNAME $DOMAIN → $PAGES_HOST"
           fi
           echo "Site: https://$DOMAIN"
