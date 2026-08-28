@@ -2,6 +2,7 @@ package project
 
 import (
 	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -64,6 +65,102 @@ func FixLocalhostEnv(p Project) (int, error) {
 	}
 	os.Remove(filepath.Join(p.Path, "bootstrap", "cache", "config.php"))
 	return changed, nil
+}
+
+// --- Tunnel host swap -------------------------------------------------------
+//
+// Apps that build absolute URLs from .env keys (APP_URL, and custom ones such
+// as ADMIN_URL / ACCOUNT_DOMAIN) send tunnel visitors back to the local .test
+// domain, which is unreachable from outside. While a tunnel is up DevBox
+// swaps every *_URL / *_DOMAIN value that equals the project's domain for the
+// public hostname, remembers the originals in .env.devbox-tunnel.json and
+// restores them when the tunnel stops.
+
+func tunnelSwapFile(p Project) string {
+	return filepath.Join(p.Path, ".env.devbox-tunnel.json")
+}
+
+// SwapEnvHostForTunnel rewrites domain-bound .env values to publicHost.
+// Returns the number of keys changed.
+func SwapEnvHostForTunnel(p Project, publicHost string) int {
+	if p.Domain == "" || publicHost == "" {
+		return 0
+	}
+	envPath := filepath.Join(p.Path, ".env")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return 0
+	}
+	// Restore first so a second swap (new tunnel URL) starts from the originals.
+	if _, err := os.Stat(tunnelSwapFile(p)); err == nil {
+		RestoreEnvAfterTunnel(p)
+		data, _ = os.ReadFile(envPath)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	originals := map[string]string{}
+	for i, line := range lines {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		if !(strings.HasSuffix(k, "_URL") || strings.HasSuffix(k, "_DOMAIN") || k == "APP_URL") {
+			continue
+		}
+		val := strings.Trim(strings.TrimSpace(v), `"`)
+		var repl string
+		switch strings.TrimSuffix(val, "/") {
+		case "https://" + p.Domain, "http://" + p.Domain:
+			repl = "https://" + publicHost
+		case p.Domain:
+			repl = publicHost
+		default:
+			continue
+		}
+		originals[k] = strings.TrimSpace(v)
+		lines[i] = k + "=" + repl
+	}
+	if len(originals) == 0 {
+		return 0
+	}
+	if b, err := json.MarshalIndent(originals, "", "  "); err == nil {
+		os.WriteFile(tunnelSwapFile(p), b, 0644)
+	}
+	os.WriteFile(envPath, []byte(strings.Join(lines, "\n")), 0644)
+	os.Remove(filepath.Join(p.Path, "bootstrap", "cache", "config.php"))
+	return len(originals)
+}
+
+// RestoreEnvAfterTunnel puts the original values back (no-op without a swap file).
+func RestoreEnvAfterTunnel(p Project) {
+	b, err := os.ReadFile(tunnelSwapFile(p))
+	if err != nil {
+		return
+	}
+	var originals map[string]string
+	if json.Unmarshal(b, &originals) != nil || len(originals) == 0 {
+		os.Remove(tunnelSwapFile(p))
+		return
+	}
+	envPath := filepath.Join(p.Path, ".env")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		k, _, ok := strings.Cut(strings.TrimSpace(line), "=")
+		k = strings.TrimSpace(k)
+		if ok {
+			if orig, has := originals[k]; has {
+				lines[i] = k + "=" + orig
+			}
+		}
+	}
+	os.WriteFile(envPath, []byte(strings.Join(lines, "\n")), 0644)
+	os.Remove(filepath.Join(p.Path, "bootstrap", "cache", "config.php"))
+	os.Remove(tunnelSwapFile(p))
 }
 
 // LocalhostEnvHints lists *_URL / *_DOMAIN / *_HOST-style keys in the project's

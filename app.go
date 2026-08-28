@@ -62,6 +62,11 @@ func NewApp() *App {
 // shutdown is called when the app is closing
 func (a *App) shutdown(ctx context.Context) {
 	debugLog("App shutting down, stopping all tunnels, dev servers, and services...")
+	if projects, err := project.ListProjects(); err == nil {
+		for _, p := range projects {
+			project.RestoreEnvAfterTunnel(p) // undo tunnel host swaps
+		}
+	}
 	tunnel.StopAllTunnels()
 	project.StopAllDevServers()
 	runtime.StopPHPCGI()
@@ -180,7 +185,10 @@ func (a *App) startup(ctx context.Context) {
 
 	// A quick tunnel learns its public URL a moment after starting; add that
 	// hostname to the project's vhosts so the tunnel serves the right site.
-	tunnel.OnURLDiscovered = func(string) { a.regenerateAllVhosts() }
+	tunnel.OnURLDiscovered = func(name string) {
+		a.swapEnvForTunnel(name)
+		a.regenerateAllVhosts()
+	}
 
 	// Tray icon (Windows / macOS with cgo). Runs on the app's own event loop.
 	start, end := a.setupTray()
@@ -2221,10 +2229,37 @@ func (a *App) StartTunnel(port int, projectName string, domain string, ssl bool)
 		if err := tunnel.StartNamedTunnel(projectName, p.PublicHostname, origin, "", ssl); err != nil {
 			return err
 		}
+		a.swapEnvForTunnel(projectName)
 		a.regenerateAllVhosts()
 		return nil
 	}
 	return tunnel.StartTunnel(port, projectName, domain, ssl)
+}
+
+// swapEnvForTunnel points the project's domain-bound .env values at its public
+// hostname while a tunnel is up (see project.SwapEnvHostForTunnel).
+func (a *App) swapEnvForTunnel(projectName string) {
+	hosts := tunnel.PublicHostsFor(projectName)
+	if len(hosts) == 0 {
+		return
+	}
+	projects, _ := project.ListProjects()
+	for _, p := range projects {
+		if p.Name == projectName {
+			if n := project.SwapEnvHostForTunnel(p, hosts[0]); n > 0 {
+				debugLog("tunnel: %d .env value(s) of %s now point at %s", n, projectName, hosts[0])
+			}
+		}
+	}
+}
+
+func (a *App) restoreEnvAfterTunnel(projectName string) {
+	projects, _ := project.ListProjects()
+	for _, p := range projects {
+		if p.Name == projectName {
+			project.RestoreEnvAfterTunnel(p)
+		}
+	}
 }
 
 // StopTunnel stops the tunnel for a specific project (quick or custom-domain).
@@ -2235,6 +2270,7 @@ func (a *App) StopTunnel(projectName string) error {
 	if err := tunnel.StopNamedTunnel(projectName); err != nil {
 		return err
 	}
+	a.restoreEnvAfterTunnel(projectName)
 	go a.regenerateAllVhosts()
 	return nil
 }
