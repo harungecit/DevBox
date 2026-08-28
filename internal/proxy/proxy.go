@@ -32,6 +32,9 @@ const (
 	HTTPPort = 80
 	// HTTPSPort is reserved for the HTTPS listener wired up in phase 4.
 	HTTPSPort = 443
+	// AdminAddr is the loopback admin endpoint used for zero-downtime reloads.
+	// Not Caddy's default 2019 so a user-installed Caddy service can't collide.
+	AdminAddr = "127.0.0.1:20190"
 )
 
 func proxyDir() string {
@@ -162,12 +165,19 @@ func Reload() error {
 		"reload",
 		"--config", caddyfilePath(),
 		"--adapter", "caddyfile",
+		"--address", AdminAddr,
 	)
 	cmd.Dir = proxyDir()
 	platform.SetProcessAttrs(cmd, false, true)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("caddy reload failed: %s: %w", strings.TrimSpace(string(out)), err)
+		// A proxy started by an older DevBox (admin off) can't be reloaded:
+		// restart it so the new routes take effect anyway.
+		Stop()
+		time.Sleep(300 * time.Millisecond)
+		if startErr := Start(); startErr != nil {
+			return fmt.Errorf("caddy reload failed (%s) and restart failed: %w", strings.TrimSpace(string(out)), startErr)
+		}
 	}
 	return nil
 }
