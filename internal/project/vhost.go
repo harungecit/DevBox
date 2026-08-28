@@ -77,6 +77,15 @@ func GenerateNginxVhost(project Project, phpCgiPort int, httpPort int) error {
 
 	locationBlock := nginxLocationBlock(project, docRoot, phpCgiPort)
 
+	if project.SSL && !certsExist(project.Domain) {
+		// The flag is set but the files are gone (moved data dir, deleted certs).
+		// Try to regenerate; if that fails, fall back to plain HTTP so a single
+		// project can never take the whole web server down.
+		if err := SetupProjectSSL(project.Domain); err != nil || !certsExist(project.Domain) {
+			project.SSL = false
+		}
+	}
+
 	if project.SSL {
 		certDir := filepath.Join(config.GetDataDir(), "ssl", "certs")
 		certFile := strings.ReplaceAll(filepath.Join(certDir, project.Domain+".pem"), "\\", "/")
@@ -219,6 +228,17 @@ func GenerateCaddyVhost(project Project, phpCgiPort int) error {
 
 	_, err = f.WriteString("\n" + conf)
 	return err
+}
+
+// certsExist reports whether both mkcert files for a domain are present.
+func certsExist(domain string) bool {
+	certDir := filepath.Join(config.GetDataDir(), "ssl", "certs")
+	for _, f := range []string{domain + ".pem", domain + "-key.pem"} {
+		if _, err := os.Stat(filepath.Join(certDir, f)); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // RemoveNginxVhost removes an nginx vhost config

@@ -32,11 +32,30 @@ func migrateLegacyDataDir(newDir string) bool {
 	if _, err := os.Stat(filepath.Join(legacy, "config.json")); err != nil {
 		return false // nothing to migrate
 	}
-	if _, err := os.Stat(filepath.Join(newDir, "config.json")); err == nil {
+	// A pending marker means a previous attempt died mid-copy (the app was
+	// closed while the tree was still being copied): resume instead of skipping.
+	pending := filepath.Join(newDir, ".migration-pending")
+	_, resume := os.Stat(pending)
+	if _, err := os.Stat(filepath.Join(newDir, "config.json")); err == nil && resume != nil {
 		return false // new location already initialised — never clobber it
 	}
 
 	logf := migrationLogger(newDir)
+	if resume == nil {
+		logf("resuming interrupted migration %s -> %s", legacy, newDir)
+		stopLegacyProcesses(legacy, logf)
+		if err := copyTree(legacy, newDir); err != nil {
+			logf("resume copy failed: %v", err)
+			return false
+		}
+		rewritten := rewriteEmbeddedPaths(newDir, legacy, newDir)
+		logf("rewrote %d config files", rewritten)
+		rewriteManagedPATH(legacy, newDir, logf)
+		os.Remove(pending)
+		os.WriteFile(filepath.Join(legacy, "MOVED-TO.txt"), []byte("DevBox data now lives in "+newDir+"\nThis folder can be deleted.\n"), 0644)
+		logf("migration complete (resumed)")
+		return true
+	}
 	logf("migrating %s -> %s", legacy, newDir)
 
 	stopLegacyProcesses(legacy, logf)
@@ -50,11 +69,15 @@ func migrateLegacyDataDir(newDir string) bool {
 
 	if err := os.Rename(legacy, newDir); err != nil {
 		logf("rename failed (%v), falling back to copy", err)
+		// Mark the copy as in progress so an interrupted run resumes next launch
+		// instead of silently starting with half the data.
+		os.MkdirAll(newDir, 0755)
+		os.WriteFile(pending, []byte(legacy), 0644)
 		if err := copyTree(legacy, newDir); err != nil {
-			logf("copy failed: %v — leaving data in place", err)
-			os.RemoveAll(newDir)
+			logf("copy failed: %v — will retry next launch", err)
 			return false
 		}
+		os.Remove(pending)
 		// Keep the old tree only as a safety net; mark it so the user knows.
 		os.WriteFile(filepath.Join(legacy, "MOVED-TO.txt"), []byte("DevBox data now lives in "+newDir+"\nThis folder can be deleted.\n"), 0644)
 	}
@@ -325,6 +348,10 @@ func copyTree(src, dst string) error {
 		info, err := d.Info()
 		if err != nil {
 			return err
+		}
+		// Resume-safe: a file already copied in a previous (interrupted) run is skipped.
+		if existing, err := os.Stat(target); err == nil && existing.Size() == info.Size() {
+			return nil
 		}
 		in, err := os.Open(path)
 		if err != nil {

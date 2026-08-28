@@ -513,9 +513,13 @@ func (a *App) UpdateRuntime(name, from, to string) error {
 				})
 			}
 
-			if err := mgr.Install(to, progress); err != nil {
-				fail(err)
-				return
+			// The target may already be installed (user installed it separately
+			// earlier): then this is a consolidation — skip the download.
+			if _, err := os.Stat(mgr.BinaryPath(to)); err != nil {
+				if err := mgr.Install(to, progress); err != nil {
+					fail(err)
+					return
+				}
 			}
 
 			progress <- runtime.Progress{Percent: 99, Message: "Migrating settings from " + from + "..."}

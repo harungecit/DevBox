@@ -147,12 +147,16 @@ func FindUpdates(name string, remote []Version) []RuntimeUpdate {
 	if err != nil {
 		return nil
 	}
+	isInstalled := map[string]bool{}
+	for _, inst := range installed {
+		isInstalled[inst.Number] = true
+	}
 	var out []RuntimeUpdate
 	for _, inst := range installed {
 		line := UpdateLine(name, inst.Number)
 		best := ""
 		for _, r := range remote {
-			if !updateCandidate(name, r) || UpdateLine(name, r.Number) != line {
+			if !updateCandidate(name, r) || UpdateLine(name, r.Number) != line || isInstalled[r.Number] {
 				continue
 			}
 			if compareVersions(r.Number, inst.Number) > 0 && (best == "" || compareVersions(r.Number, best) > 0) {
@@ -170,9 +174,14 @@ func FindUpdates(name string, remote []Version) []RuntimeUpdate {
 // (the highest installed version in the same line that is older), or "".
 func UpdateTarget(name, remoteVersion string, installed []Version) string {
 	line := UpdateLine(name, remoteVersion)
+	for _, inst := range installed {
+		if inst.Number == remoteVersion {
+			return "" // already installed — nothing to update to
+		}
+	}
 	best := ""
 	for _, inst := range installed {
-		if inst.Number == remoteVersion || UpdateLine(name, inst.Number) != line {
+		if UpdateLine(name, inst.Number) != line {
 			continue
 		}
 		if compareVersions(remoteVersion, inst.Number) > 0 && (best == "" || compareVersions(inst.Number, best) > 0) {
