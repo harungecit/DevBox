@@ -178,6 +178,10 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}()
 
+	// A quick tunnel learns its public URL a moment after starting; add that
+	// hostname to the project's vhosts so the tunnel serves the right site.
+	tunnel.OnURLDiscovered = func(string) { a.regenerateAllVhosts() }
+
 	// Tray icon (Windows / macOS with cgo). Runs on the app's own event loop.
 	start, end := a.setupTray()
 	a.trayEnd = end
@@ -2214,7 +2218,11 @@ func (a *App) StartTunnel(port int, projectName string, domain string, ssl bool)
 		if ssl {
 			origin = "https://127.0.0.1:443"
 		}
-		return tunnel.StartNamedTunnel(projectName, p.PublicHostname, origin, domain, ssl)
+		if err := tunnel.StartNamedTunnel(projectName, p.PublicHostname, origin, "", ssl); err != nil {
+			return err
+		}
+		a.regenerateAllVhosts()
+		return nil
 	}
 	return tunnel.StartTunnel(port, projectName, domain, ssl)
 }
@@ -2224,7 +2232,11 @@ func (a *App) StopTunnel(projectName string) error {
 	if err := tunnel.StopTunnel(projectName); err != nil {
 		return err
 	}
-	return tunnel.StopNamedTunnel(projectName)
+	if err := tunnel.StopNamedTunnel(projectName); err != nil {
+		return err
+	}
+	go a.regenerateAllVhosts()
+	return nil
 }
 
 // GetTunnelURL returns the public tunnel URL for a specific project

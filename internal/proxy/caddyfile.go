@@ -41,7 +41,11 @@ func WriteCaddyfile() error {
 			continue
 		}
 
-		fmt.Fprintf(&sb, "http://%s {\n", p.Domain)
+		hosts := append([]string{p.Domain}, project.ExtraHosts(p)...)
+		for i := range hosts {
+			hosts[i] = "http://" + hosts[i]
+		}
+		fmt.Fprintf(&sb, "%s {\n", strings.Join(hosts, ", "))
 		fmt.Fprintf(&sb, "\treverse_proxy %s {\n", backend)
 		// Forward the original Host so the backend's own vhost routing picks the
 		// right project (nginx server_name, FrankenPHP host matcher, etc.).

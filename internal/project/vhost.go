@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"DevBox/internal/config"
+	"DevBox/internal/tunnel"
 )
 
 // nginxLocationBlock returns the appropriate location block based on project type.
@@ -107,7 +108,7 @@ server {
     ssl_certificate_key %s;
 %s
 }
-`, project.Name, httpPort, project.Domain, project.Domain, certFile, keyFile, locationBlock)
+`, project.Name, httpPort, nginxHosts(project), nginxHosts(project), certFile, keyFile, locationBlock)
 
 		return os.WriteFile(confPath, []byte(conf), 0644)
 	}
@@ -119,7 +120,7 @@ server {
     server_name %s;
 %s
 }
-`, project.Name, httpPort, project.Domain, locationBlock)
+`, project.Name, httpPort, nginxHosts(project), locationBlock)
 
 	return os.WriteFile(confPath, []byte(conf), 0644)
 }
@@ -149,11 +150,11 @@ func GenerateApacheVhost(project Project, httpPort int, phpCgiPort int) error {
 		conf = fmt.Sprintf(`# DevBox generated vhost for %s
 <VirtualHost *:%d>
     ServerName %s
-    ProxyPreserveHost On
+%s    ProxyPreserveHost On
     ProxyPass / http://127.0.0.1:%d/
     ProxyPassReverse / http://127.0.0.1:%d/
 </VirtualHost>
-`, project.Name, httpPort, project.Domain, project.Port, project.Port)
+`, project.Name, httpPort, project.Domain, apacheAliases(project), project.Port, project.Port)
 	} else {
 		phpBlock := ""
 		if phpCgiPort > 0 {
@@ -167,7 +168,7 @@ func GenerateApacheVhost(project Project, httpPort int, phpCgiPort int) error {
 		conf = fmt.Sprintf(`# DevBox generated vhost for %s
 <VirtualHost *:%d>
     ServerName %s
-    DocumentRoot "%s"
+%s    DocumentRoot "%s"
 %s
     <Directory "%s">
         Options Indexes FollowSymLinks
@@ -175,7 +176,7 @@ func GenerateApacheVhost(project Project, httpPort int, phpCgiPort int) error {
         Require all granted
     </Directory>
 </VirtualHost>
-`, project.Name, httpPort, project.Domain, docRoot, phpBlock, docRoot)
+`, project.Name, httpPort, project.Domain, apacheAliases(project), docRoot, phpBlock, docRoot)
 	}
 
 	return os.WriteFile(confPath, []byte(conf), 0644)
@@ -203,7 +204,7 @@ func GenerateCaddyVhost(project Project, phpCgiPort int) error {
 %s {
     reverse_proxy 127.0.0.1:%d
 }
-`, project.Name, project.Domain, project.Port)
+`, project.Name, caddyHosts(project), project.Port)
 	} else {
 		phpBlock := ""
 		if phpCgiPort > 0 {
@@ -215,7 +216,7 @@ func GenerateCaddyVhost(project Project, phpCgiPort int) error {
     file_server%s
     encode gzip
 }
-`, project.Name, project.Domain, docRoot, phpBlock)
+`, project.Name, caddyHosts(project), docRoot, phpBlock)
 	}
 
 	// Append to Caddyfile
@@ -228,6 +229,31 @@ func GenerateCaddyVhost(project Project, phpCgiPort int) error {
 
 	_, err = f.WriteString("\n" + conf)
 	return err
+}
+
+// ExtraHosts returns additional hostnames a project must answer to besides
+// its local domain: the public hostname of a running Cloudflare tunnel. The
+// tunnel forwards the visitor's original Host header, so vhosts need to match
+// it — and the app then builds its links/redirects from the public address
+// instead of sending visitors back to the .test domain.
+func ExtraHosts(p Project) []string {
+	return tunnel.PublicHostsFor(p.Name)
+}
+
+func nginxHosts(p Project) string {
+	return strings.Join(append([]string{p.Domain}, ExtraHosts(p)...), " ")
+}
+
+func caddyHosts(p Project) string {
+	return strings.Join(append([]string{p.Domain}, ExtraHosts(p)...), ", ")
+}
+
+func apacheAliases(p Project) string {
+	out := ""
+	for _, h := range ExtraHosts(p) {
+		out += "    ServerAlias " + h + "\n"
+	}
+	return out
 }
 
 // certsExist reports whether both mkcert files for a domain are present.
@@ -271,7 +297,11 @@ func GenerateFrankenPHPVhost(p Project) error {
 	}
 
 	listen := fmt.Sprintf(":%d", frankenphpListenPort())
-	addr := fmt.Sprintf("http://%s%s", p.Domain, listen)
+	var addrs []string
+	for _, h := range append([]string{p.Domain}, ExtraHosts(p)...) {
+		addrs = append(addrs, "http://"+h+listen)
+	}
+	addr := strings.Join(addrs, ", ")
 
 	var conf string
 	if IsAppServer(p.Framework) && p.Port > 0 {

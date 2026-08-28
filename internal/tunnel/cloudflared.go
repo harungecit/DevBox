@@ -71,6 +71,34 @@ func killStaleProcess(projectName string) {
 	os.Remove(urlFile(projectName))
 }
 
+// OnURLDiscovered is called (in its own goroutine) as soon as a quick tunnel's
+// public URL is known; the app uses it to add the hostname to vhosts.
+var OnURLDiscovered func(projectName string)
+
+// PublicHostsFor returns the public hostnames currently routed to a project:
+// the quick-tunnel host (if running) and the named-tunnel hostname (if routed).
+func PublicHostsFor(projectName string) []string {
+	var hosts []string
+	if u := GetTunnelURL(projectName); u != "" {
+		h := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(u, "https://"), "http://"), "/")
+		if h != "" {
+			hosts = append(hosts, h)
+		}
+	}
+	if r := NamedRouteFor(projectName); r != nil {
+		dup := false
+		for _, h := range hosts {
+			if h == r.Hostname {
+				dup = true
+			}
+		}
+		if !dup {
+			hosts = append(hosts, r.Hostname)
+		}
+	}
+	return hosts
+}
+
 // IsCloudflaredInstalled checks if cloudflared is available
 func IsCloudflaredInstalled() bool {
 	_, err := os.Stat(cloudflaredPath())
@@ -167,14 +195,11 @@ func StartTunnel(port int, projectName string, domain string, ssl bool) error {
 	if ssl {
 		args = append(args, "--no-tls-verify")
 	}
-	// Always set the host header to the project's domain. Without this, multiple
-	// parallel tunnels (one per project) all hit the backend's default vhost
-	// because cloudflared otherwise forwards the random *.trycloudflare.com Host,
-	// which matches no specific vhost and falls into whatever is registered
-	// first. Setting it explicitly per tunnel keeps each project isolated.
-	if domain != "" {
-		args = append(args, "--http-host-header", domain)
-	}
+	// The visitor's Host (xxx.trycloudflare.com) is forwarded unchanged: once the
+	// URL is known, OnURLDiscovered re-generates the project's vhosts with that
+	// hostname as an alias, so the web server matches it AND the app builds its
+	// links/redirects from the public address rather than the .test domain.
+	_ = domain
 
 	cmd := exec.Command(exe, args...)
 	platform.SetProcessAttrs(cmd, true, true)
@@ -209,6 +234,9 @@ func StartTunnel(port int, projectName string, domain string, ssl bool) error {
 				tunnelMu.Unlock()
 				// Persist URL for state recovery
 				os.WriteFile(urlFile(projectName), []byte(match), 0644)
+				if OnURLDiscovered != nil {
+					go OnURLDiscovered(projectName)
+				}
 			}
 		}
 	}
