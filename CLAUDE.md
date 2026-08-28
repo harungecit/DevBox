@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 DevBox is a cross-platform (Windows + macOS) desktop application for managing development runtimes (Go, Node.js, PHP, Python, Rust) and services (Nginx, Apache, Caddy, PostgreSQL, MySQL, MariaDB, MongoDB, Redis, Valkey, Mailpit). Built with Wails v2 (Go backend + Svelte/TypeScript frontend). Author: Harun Geçit.
 
+## Commit rules
+
+- **Never add `Co-Authored-By:` or `Claude-Session:` trailers to commits.** Plain commit messages only — the author wants a clean history under their own name.
+
 ## Development Commands
 
 ```bash
