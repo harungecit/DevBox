@@ -449,6 +449,10 @@ http {
     default_type  application/octet-stream;
     sendfile      on;
     keepalive_timeout  65;
+    # Long hostnames (Cloudflare quick-tunnel *.trycloudflare.com aliases)
+    # overflow the 32-byte default on Windows and make the config test fail.
+    server_names_hash_bucket_size 128;
+    client_max_body_size 100m;
 
     server {
         listen       %d;
