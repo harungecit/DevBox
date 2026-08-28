@@ -30,6 +30,7 @@
     SetProjectRuntimeVersion,
     SetProjectWebserver,
     SetProjectPublicHostname,
+    GetProjectEnvHints,
     GetDefaultProjectsDir,
     GetInstalledVersions,
     GetAllServices,
@@ -429,10 +430,20 @@
 
   // --- Existing functions ---
 
+  // .env values still pointing at localhost (per project) — the #1 reason a
+  // domain "redirects to 127.0.0.1:8000".
+  let envHints: Record<string, { key: string; value: string }[]> = {};
+
   async function loadProjects() {
     loading = true;
     try {
       projects = await ListProjects() || [];
+      const next: typeof envHints = {};
+      await Promise.all(projects.map(async p => {
+        if (!p.domain) return;
+        try { const h = await GetProjectEnvHints(p.name); if (h && h.length) next[p.name] = h; } catch { /* ignore */ }
+      }));
+      envHints = next;
     } catch (e) {
       console.error('Failed to load projects:', e);
       projects = [];
@@ -1410,6 +1421,16 @@
               >
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
               </button>
+            </div>
+          {/if}
+
+          {#if envHints[proj.name]}
+            <div class="mt-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/20 text-xs">
+              <p class="text-amber-600 dark:text-amber-400 font-medium">{$t('projects.envHintsTitle', proj.domain)}</p>
+              <div class="font-mono text-[11px] mt-1.5 space-y-0.5 text-[var(--color-text-secondary)]">
+                {#each envHints[proj.name] as h}<div>{h.key}=<span class="text-red-500">{h.value}</span></div>{/each}
+              </div>
+              <p class="mt-1.5 text-[var(--color-text-secondary)]">{$t('projects.envHintsFix', proj.domain)}</p>
             </div>
           {/if}
 

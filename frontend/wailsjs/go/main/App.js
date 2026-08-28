@@ -170,6 +170,10 @@ export function GetPnpmVersion() {
   return window['go']['main']['App']['GetPnpmVersion']();
 }
 
+export function GetProjectEnvHints(arg1) {
+  return window['go']['main']['App']['GetProjectEnvHints'](arg1);
+}
+
 export function GetProjectVhostPath(arg1) {
   return window['go']['main']['App']['GetProjectVhostPath'](arg1);
 }

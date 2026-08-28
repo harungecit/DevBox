@@ -1992,6 +1992,18 @@ func (a *App) SetProjectWebserver(name, ws string) error {
 	return nil
 }
 
+// GetProjectEnvHints lists .env values that still point at localhost and would
+// break redirects on the project's domain / tunnel.
+func (a *App) GetProjectEnvHints(name string) []project.EnvHint {
+	projects, _ := project.ListProjects()
+	for _, p := range projects {
+		if p.Name == name {
+			return project.LocalhostEnvHints(p)
+		}
+	}
+	return nil
+}
+
 // SetProjectPublicHostname sets the custom-domain hostname used by named tunnels.
 func (a *App) SetProjectPublicHostname(name, hostname string) error {
 	return project.SetProjectPublicHostname(name, hostname)

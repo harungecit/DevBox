@@ -376,6 +376,8 @@
   "tools.upToDate": "Güncel",
 
   "projects.publicHostname": "Genel alan adı",
+  "projects.envHintsTitle": "Bu .env değerleri hâlâ localhost'u gösteriyor — uygulama, {0} (ve tünel) ziyaretçilerini alan adında tutmak yerine oraya yönlendirir:",
+  "projects.envHintsFix": "Bunları https://{0} (veya DevBox'ta kaydettiğiniz alt alan adları) yapıp sayfayı yenileyin.",
   "projects.publicHostnameHint": "Kendi alan adınızda paylaşın (Ayarlar'da bağlı bir Cloudflare hesabı gerekir). Boş bırakırsanız rastgele bir trycloudflare.com bağlantısı kullanılır.",
   "projects.publicHostnamePlaceholder": "uygulama.ornek.com",
   "tunnel.custom": "Özel alan adı",

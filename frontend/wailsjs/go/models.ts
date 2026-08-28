@@ -285,6 +285,20 @@ export namespace main {
 
 export namespace project {
 	
+	export class EnvHint {
+	    key: string;
+	    value: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new EnvHint(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.value = source["value"];
+	    }
+	}
 	export class FrameworkTemplate {
 	    id: string;
 	    name: string;

@@ -376,6 +376,8 @@
   "tools.upToDate": "Up to date",
 
   "projects.publicHostname": "Public hostname",
+  "projects.envHintsTitle": "These .env values still point at localhost — the app will redirect visitors of {0} (and of a tunnel) there instead of staying on the domain:",
+  "projects.envHintsFix": "Set them to https://{0} (or to sub-domains you register in DevBox) and reload.",
   "projects.publicHostnameHint": "Share on your own domain (needs a linked Cloudflare account in Settings). Leave empty for a random trycloudflare.com link.",
   "projects.publicHostnamePlaceholder": "myapp.example.com",
   "tunnel.custom": "Custom domain",

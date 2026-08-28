@@ -93,6 +93,8 @@ export function GetPeclExtensions(arg1:string):Promise<Array<runtime.PeclExtensi
 
 export function GetPnpmVersion():Promise<string>;
 
+export function GetProjectEnvHints(arg1:string):Promise<Array<project.EnvHint>>;
+
 export function GetProjectVhostPath(arg1:string):Promise<string>;
 
 export function GetProxyLogPath():Promise<string>;
