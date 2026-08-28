@@ -33,17 +33,35 @@ func nginxLocationBlock(project Project, docRoot string, phpCgiPort int) string 
 	// File serving for PHP/Static projects
 	phpBlock := ""
 	if phpCgiPort > 0 {
+		// Per-request URL env: keys bound to the local domain in .env follow the
+		// request Host, so local domain and tunnel hostname work side by side.
+		envParams := ""
+		urlKeys, domainKeys := DomainBoundEnvKeys(project)
+		for _, k := range urlKeys {
+			envParams += fmt.Sprintf("        fastcgi_param %s $devbox_scheme://$host;\n", k)
+		}
+		for _, k := range domainKeys {
+			envParams += fmt.Sprintf("        fastcgi_param %s $host;\n", k)
+		}
 		phpBlock = fmt.Sprintf(`
 
     location ~ \.php$ {
         fastcgi_pass 127.0.0.1:%d;
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        include fastcgi_params;
-    }`, phpCgiPort)
+        fastcgi_param HTTPS $devbox_https;
+%s        include fastcgi_params;
+    }`, phpCgiPort, envParams)
 	}
 
 	return fmt.Sprintf(`
+    # Effective scheme: https when served on 443 or when the front-door proxy /
+    # Cloudflare tunnel terminated TLS upstream (X-Forwarded-Proto).
+    set $devbox_scheme $scheme;
+    set $devbox_https off;
+    if ($scheme = https) { set $devbox_https on; }
+    if ($http_x_forwarded_proto = "https") { set $devbox_scheme https; set $devbox_https on; }
+
     root %s;
     index index.php index.html index.htm;
 

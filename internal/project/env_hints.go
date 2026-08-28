@@ -67,7 +67,42 @@ func FixLocalhostEnv(p Project) (int, error) {
 	return changed, nil
 }
 
-// --- Tunnel host swap -------------------------------------------------------
+// DomainBoundEnvKeys returns the .env keys whose value is the project's own
+// domain (http(s)://backend.test or bare backend.test). Web servers inject
+// these per request as FastCGI params derived from the request Host, so the
+// same app answers correctly on its local domain AND on a tunnel hostname at
+// the same time — Laravel's Dotenv never overrides variables already present
+// in $_SERVER, so the .env file itself stays untouched.
+// Returns url keys and domain keys separately.
+func DomainBoundEnvKeys(p Project) (urlKeys, domainKeys []string) {
+	if p.Domain == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(filepath.Join(p.Path, ".env"))
+	if err != nil {
+		return nil, nil
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		if !(strings.HasSuffix(k, "_URL") || strings.HasSuffix(k, "_DOMAIN")) {
+			continue
+		}
+		val := strings.TrimSuffix(strings.Trim(strings.TrimSpace(v), `"`), "/")
+		switch val {
+		case "https://" + p.Domain, "http://" + p.Domain:
+			urlKeys = append(urlKeys, k)
+		case p.Domain:
+			domainKeys = append(domainKeys, k)
+		}
+	}
+	return urlKeys, domainKeys
+}
+
+// --- Tunnel host swap (legacy; kept only to restore files touched by 0.2.0) ---
 //
 // Apps that build absolute URLs from .env keys (APP_URL, and custom ones such
 // as ADMIN_URL / ACCOUNT_DOMAIN) send tunnel visitors back to the local .test
