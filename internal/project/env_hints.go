@@ -19,6 +19,53 @@ type EnvHint struct {
 
 var loopbackValue = regexp.MustCompile(`^"?(?:https?://)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?/?"?$`)
 
+// FixLocalhostEnv rewrites every flagged value to the project's domain:
+// *_URL → http(s)://domain, *_DOMAIN → domain. Keeps .env.devbox-backup and
+// drops Laravel's cached config. Returns the number of keys changed.
+func FixLocalhostEnv(p Project) (int, error) {
+	hints := LocalhostEnvHints(p)
+	if len(hints) == 0 || p.Domain == "" {
+		return 0, nil
+	}
+	envPath := filepath.Join(p.Path, ".env")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return 0, err
+	}
+	scheme := "http"
+	if p.SSL {
+		scheme = "https"
+	}
+	flagged := map[string]bool{}
+	for _, h := range hints {
+		flagged[h.Key] = true
+	}
+	lines := strings.Split(string(data), "\n")
+	changed := 0
+	for i, line := range lines {
+		k, _, ok := strings.Cut(strings.TrimSpace(line), "=")
+		k = strings.TrimSpace(k)
+		if !ok || !flagged[k] {
+			continue
+		}
+		if strings.HasSuffix(k, "_DOMAIN") {
+			lines[i] = k + "=" + p.Domain
+		} else {
+			lines[i] = k + "=" + scheme + "://" + p.Domain
+		}
+		changed++
+	}
+	if changed == 0 {
+		return 0, nil
+	}
+	os.WriteFile(filepath.Join(p.Path, ".env.devbox-backup"), data, 0644)
+	if err := os.WriteFile(envPath, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+		return 0, err
+	}
+	os.Remove(filepath.Join(p.Path, "bootstrap", "cache", "config.php"))
+	return changed, nil
+}
+
 // LocalhostEnvHints lists *_URL / *_DOMAIN / *_HOST-style keys in the project's
 // .env whose value is a loopback address. Database/cache hosts (DB_HOST,
 // REDIS_HOST, …) are legitimately 127.0.0.1 and are skipped.

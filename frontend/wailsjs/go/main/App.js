@@ -54,6 +54,10 @@ export function EnableYarn() {
   return window['go']['main']['App']['EnableYarn']();
 }
 
+export function FixProjectEnvHints(arg1) {
+  return window['go']['main']['App']['FixProjectEnvHints'](arg1);
+}
+
 export function GetAdminerURL() {
   return window['go']['main']['App']['GetAdminerURL']();
 }

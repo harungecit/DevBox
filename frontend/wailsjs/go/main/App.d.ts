@@ -35,6 +35,8 @@ export function EnablePnpm():Promise<void>;
 
 export function EnableYarn():Promise<void>;
 
+export function FixProjectEnvHints(arg1:string):Promise<number>;
+
 export function GetAdminerURL():Promise<string>;
 
 export function GetAllServices():Promise<Record<string, service.ServiceInfo>>;

@@ -2004,6 +2004,17 @@ func (a *App) GetProjectEnvHints(name string) []project.EnvHint {
 	return nil
 }
 
+// FixProjectEnvHints rewrites localhost .env values to the project's domain.
+func (a *App) FixProjectEnvHints(name string) (int, error) {
+	projects, _ := project.ListProjects()
+	for _, p := range projects {
+		if p.Name == name {
+			return project.FixLocalhostEnv(p)
+		}
+	}
+	return 0, fmt.Errorf("project not found: %s", name)
+}
+
 // SetProjectPublicHostname sets the custom-domain hostname used by named tunnels.
 func (a *App) SetProjectPublicHostname(name, hostname string) error {
 	return project.SetProjectPublicHostname(name, hostname)

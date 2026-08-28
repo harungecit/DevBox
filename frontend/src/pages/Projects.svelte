@@ -31,6 +31,7 @@
     SetProjectWebserver,
     SetProjectPublicHostname,
     GetProjectEnvHints,
+    FixProjectEnvHints,
     GetDefaultProjectsDir,
     GetInstalledVersions,
     GetAllServices,
@@ -127,7 +128,9 @@
   // webserverChoicesFor returns the list of allowed webservers given a runtime.
   // App-server runtimes can only use their own dev server; PHP/Static can pick
   // any installed managed webserver.
-  function webserverChoicesFor(rt: string): { id: string; label: string }[] {
+  // `installed` is passed in (not read from module scope) so Svelte re-evaluates
+  // the {@const} in the template once the async service list arrives.
+  function webserverChoicesFor(rt: string, installed: Set<string>, current: string): { id: string; label: string }[] {
     const isAppServer = rt === 'node' || rt === 'go' || rt === 'python' || rt === 'rust';
     if (isAppServer) {
       return [{ id: 'devserver', label: 'Dev server (built-in)' }];
@@ -137,7 +140,7 @@
       { id: '', label: 'Auto (use installed default)' },
     ];
     for (const ws of ['nginx', 'caddy', 'apache', 'frankenphp']) {
-      if (installedWebservers.has(ws)) {
+      if (installed.has(ws) || ws === current) {
         out.push({ id: ws, label: ws.charAt(0).toUpperCase() + ws.slice(1) });
       }
     }
@@ -733,8 +736,19 @@
 
   let eventCleanups: (() => void)[] = [];
 
+  async function fixEnvHints(proj: ProjectInfo) {
+    errorMessage = '';
+    try {
+      await FixProjectEnvHints(proj.name);
+      await loadProjects();
+    } catch (e: any) {
+      errorMessage = `${proj.name}: ${e?.message || e}`;
+    }
+  }
+
   onMount(async () => {
     loadProjects();
+    loadInstalledWebservers();
     loadTunnelStatus();
     loadDevServerStatus();
     try {
@@ -1430,13 +1444,16 @@
               <div class="font-mono text-[11px] mt-1.5 space-y-0.5 text-[var(--color-text-secondary)]">
                 {#each envHints[proj.name] as h}<div>{h.key}=<span class="text-red-500">{h.value}</span></div>{/each}
               </div>
-              <p class="mt-1.5 text-[var(--color-text-secondary)]">{$t('projects.envHintsFix', proj.domain)}</p>
+              <div class="flex items-center justify-between gap-3 mt-2">
+                <p class="text-[var(--color-text-secondary)]">{$t('projects.envHintsFix', proj.domain)}</p>
+                <button class="text-xs px-3 py-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600 flex-shrink-0 font-semibold" on:click={() => fixEnvHints(proj)}>{$t('projects.envHintsFixBtn')}</button>
+              </div>
             </div>
           {/if}
 
           <!-- Settings panel (runtime / version / webserver) -->
           {#if expandedProject === proj.name}
-            {@const wsChoices = webserverChoicesFor(proj.runtime || '')}
+            {@const wsChoices = webserverChoicesFor(proj.runtime || '', installedWebservers, proj.webserver || '')}
             {@const versions = installedVersionsByRuntime[proj.runtime || ''] || []}
             {@const currentRuntime = proj.runtime || ''}
             {@const currentVersion = proj.runtimeVersion || ''}
