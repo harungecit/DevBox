@@ -14,12 +14,12 @@ Runtimes · services · <code>.test</code> domains · SSL · Cloudflare tunnels 
 </p>
 
 <p align="center">
-  <a href="https://harungecit.github.io/DevBox/">Website</a> ·
+  <a href="https://devbox.harungecit.dev/">Website</a> ·
   <a href="https://github.com/harungecit/DevBox/releases/latest">Download</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#features">Features</a> ·
   <a href="#building-from-source">Build from source</a> ·
-  <a href="https://harungecit.github.io/DevBox/privacy.html">Privacy</a>
+  <a href="https://devbox.harungecit.dev/privacy.html">Privacy</a>
 </p>
 
 ---
@@ -66,7 +66,7 @@ DevBox is a free, open-source (MIT) desktop application for developers who would
 5. **Projects** → Add → pick a folder or template → click the globe icon to register `myapp.test`, flip **SSL** → open in the browser.
 6. Click the share icon to get a public URL. For your own domain: **Settings → Cloudflare**.
 
-Full guide: <https://harungecit.github.io/DevBox/#usage>
+Full guide: <https://devbox.harungecit.dev/#usage>
 
 ## Platform support
 
@@ -81,7 +81,7 @@ Full guide: <https://harungecit.github.io/DevBox/#usage>
 - Every release is built by the public [`release.yml`](.github/workflows/release.yml) workflow from the tagged source, after `go vet`, unit tests and `svelte-check` pass. `SHA256SUMS-windows.txt` is attached to each release.
 - DevBox is not yet signed with a paid Authenticode certificate, so SmartScreen may show *“Windows protected your PC”* on first run. The workflow already supports signing: add `WINDOWS_CERT_PFX_BASE64` and `WINDOWS_CERT_PASSWORD` secrets and builds are signed automatically. SmartScreen reputation also accrues over time as more people install the same signed binary.
 - Elevation is requested only for the hosts file and (first start) for the front-door proxy binding port 80; both show a UAC prompt.
-- DevBox sends no telemetry. See the [privacy policy](https://harungecit.github.io/DevBox/privacy.html) for the full list of network connections.
+- DevBox sends no telemetry. See the [privacy policy](https://devbox.harungecit.dev/privacy.html) for the full list of network connections.
 
 ## Where things live
 

@@ -1,0 +1,70 @@
+# Publishes docs/ to Cloudflare Pages at https://devbox.harungecit.dev
+#
+# One-time setup (repository → Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_ACCOUNT_ID  Cloudflare dashboard → right sidebar → Account ID
+#   CLOUDFLARE_API_TOKEN   API token with permissions:
+#                            Account · Cloudflare Pages · Edit
+#                            Zone    · DNS              · Edit   (zone: harungecit.dev)
+# Everything else — creating the Pages project, attaching the custom domain,
+# the CNAME record — is done here and is safe to re-run.
+
+name: Website
+
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**', '.github/workflows/website.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROJECT: devbox
+  DOMAIN: devbox.harungecit.dev
+  ZONE: harungecit.dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure the Pages project exists
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages project create ${{ env.PROJECT }} --production-branch=main
+        continue-on-error: true   # already exists on every run after the first
+
+      - name: Deploy docs/
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy docs --project-name=${{ env.PROJECT }} --branch=main --commit-dirty=true
+
+      - name: Attach custom domain + DNS (idempotent)
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -e
+          api() { curl -sS -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" "$@"; }
+
+          # 1) Custom domain on the Pages project
+          if ! api "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/pages/projects/$PROJECT/domains" | jq -e --arg d "$DOMAIN" '.result[]? | select(.name==$d)' >/dev/null; then
+            api -X POST "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/pages/projects/$PROJECT/domains" --data "{\"name\":\"$DOMAIN\"}" | jq -e .success >/dev/null
+            echo "attached $DOMAIN to Pages project"
+          fi
+
+          # 2) CNAME devbox → devbox.pages.dev (proxied)
+          ZONE_ID=$(api "https://api.cloudflare.com/client/v4/zones?name=$ZONE" | jq -r '.result[0].id')
+          [ "$ZONE_ID" != "null" ] || { echo "::error::zone $ZONE not visible to this token"; exit 1; }
+          if ! api "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$DOMAIN" | jq -e '.result | length > 0' >/dev/null; then
+            api -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
+              --data "{\"type\":\"CNAME\",\"name\":\"$DOMAIN\",\"content\":\"$PROJECT.pages.dev\",\"proxied\":true,\"ttl\":1,\"comment\":\"DevBox website (Cloudflare Pages)\"}" | jq -e .success >/dev/null
+            echo "created CNAME $DOMAIN → $PROJECT.pages.dev"
+          fi
+          echo "Site: https://$DOMAIN"
