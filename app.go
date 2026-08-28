@@ -968,7 +968,9 @@ func (a *App) StartService(name string) error {
 	if !ok {
 		return fmt.Errorf("unknown service: %s", name)
 	}
-	return mgr.Start()
+	err := mgr.Start()
+	a.emitServicesChanged()
+	return err
 }
 
 // StopService stops a service
@@ -977,7 +979,9 @@ func (a *App) StopService(name string) error {
 	if !ok {
 		return fmt.Errorf("unknown service: %s", name)
 	}
-	return mgr.Stop()
+	err := mgr.Stop()
+	a.emitServicesChanged()
+	return err
 }
 
 // RestartService restarts a service
@@ -986,7 +990,9 @@ func (a *App) RestartService(name string) error {
 	if !ok {
 		return fmt.Errorf("unknown service: %s", name)
 	}
-	return mgr.Restart()
+	err := mgr.Restart()
+	a.emitServicesChanged()
+	return err
 }
 
 // GetServiceLogs returns the last N lines of logs for a service
@@ -1628,13 +1634,53 @@ func (a *App) ListProjects() ([]project.Project, error) {
 	return project.ListProjects()
 }
 
-// AddProject adds a project from a selected folder
+// AddProject adds a project from a selected folder and provisions it right
+// away: hosts entry (UAC prompt), local SSL certificate, vhost.
 func (a *App) AddProject(projectPath, domain string) (*project.Project, error) {
 	p, err := project.AddProject(projectPath, domain)
-	if err == nil {
-		go a.regenerateAllVhosts()
+	if err != nil {
+		return nil, err
 	}
-	return p, err
+	a.provisionProject(p.Name)
+	projects, _ := project.ListProjects()
+	for i := range projects {
+		if projects[i].Name == p.Name {
+			return &projects[i], nil
+		}
+	}
+	return p, nil
+}
+
+// provisionProject makes a freshly added project reachable without further
+// clicks: hosts-file entry for its domain, mkcert certificate (SSL on), and
+// web-server vhost. Each step is best-effort and logged — a declined UAC
+// prompt or a missing web server must not undo the import itself.
+func (a *App) provisionProject(name string) {
+	projects, err := project.ListProjects()
+	if err != nil {
+		return
+	}
+	for i, p := range projects {
+		if p.Name != name || p.Domain == "" {
+			continue
+		}
+		if !p.HostsRegistered {
+			if err := project.AddHostsEntry(p.Domain); err != nil {
+				debugLog("provision %s: hosts entry failed: %v", name, err)
+			}
+		}
+		if !p.SSL {
+			if err := project.SetupProjectSSL(p.Domain); err != nil {
+				debugLog("provision %s: ssl failed: %v", name, err)
+			} else {
+				projects[i].SSL = true
+				project.SaveProjects(projects)
+				project.SyncLaravelAppURL(projects[i])
+			}
+		}
+		break
+	}
+	a.regenerateAllVhosts()
 }
 
 // RemoveProject removes a project
@@ -1813,7 +1859,8 @@ func (a *App) ScaffoldNewProject(templateID, parentDir, name, domain string) err
 				})
 				return
 			}
-			a.regenerateAllVhosts()
+			progress <- project.ScaffoldProgress{Percent: 98, Message: "Registering domain, SSL and vhost..."}
+			a.provisionProject(name)
 
 			wailsRuntime.EventsEmit(a.ctx, "scaffold:complete", map[string]interface{}{
 				"name": name,
@@ -1864,7 +1911,8 @@ func (a *App) CloneGitProject(gitURL, parentDir, name, domain string) error {
 				})
 				return
 			}
-			a.regenerateAllVhosts()
+			progress <- project.ScaffoldProgress{Percent: 98, Message: "Registering domain, SSL and vhost..."}
+			a.provisionProject(actualName)
 
 			wailsRuntime.EventsEmit(a.ctx, "clone:complete", map[string]interface{}{
 				"name": actualName,

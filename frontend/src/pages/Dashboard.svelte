@@ -14,7 +14,8 @@
     StartProxy,
     StopProxy,
   } from '../../wailsjs/go/main/App';
-  import { onMount } from 'svelte';
+  import { EventsOn } from '../../wailsjs/runtime/runtime';
+  import { onMount, onDestroy } from 'svelte';
 
   interface ServiceInfo {
     name: string;
@@ -104,9 +105,23 @@
     }
   }
 
+  // Live status: react to backend events (auto-start, tray start/stop-all,
+  // installs) and poll while the page is open so state never looks stale.
+  let unsubs: Array<() => void> = [];
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+
   onMount(async () => {
     await loadData();
     await loadProxyStatus();
+    unsubs.push(EventsOn('services:changed', () => { loadData(); }));
+    unsubs.push(EventsOn('service:installed', () => { loadData(); }));
+    unsubs.push(EventsOn('runtime:installed', () => { loadData(); }));
+    pollTimer = setInterval(() => { loadData(); loadProxyStatus(); }, 5000);
+  });
+
+  onDestroy(() => {
+    unsubs.forEach(fn => fn());
+    if (pollTimer) clearInterval(pollTimer);
   });
 
   $: installedServices = Object.values(services).filter(s => s.installed);

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"DevBox/internal/config"
+	"DevBox/internal/platform"
 )
 
 // Project represents a registered development project
@@ -42,13 +43,17 @@ type Project struct {
 	// named tunnel exposes this project at (e.g. "myapp.example.com"). Empty
 	// means "share via a random *.trycloudflare.com quick tunnel".
 	PublicHostname string `json:"publicHostname,omitempty"`
+
+	// HostsRegistered is computed on read (not persisted): whether Domain is
+	// currently mapped in the OS hosts file, i.e. actually reachable.
+	HostsRegistered bool `json:"hostsRegistered"`
 }
 
 // RuntimeFromFramework maps a detected framework name to the underlying runtime.
 // Returns "" for unrecognized frameworks.
 func RuntimeFromFramework(framework string) string {
 	switch framework {
-	case "Laravel", "WordPress", "Symfony", "PHP":
+	case "Laravel", "WordPress", "Symfony", "CodeIgniter", "Yii", "CakePHP", "Drupal", "PHP":
 		return "php"
 	case "Next.js", "Nuxt", "Vue", "React", "Svelte", "Angular":
 		return "node"
@@ -91,7 +96,7 @@ func (p *Project) fillDefaults() {
 // IsAppServer returns true if the framework runs its own HTTP server (Node, Python, Go, Rust etc.)
 func IsAppServer(framework string) bool {
 	switch framework {
-	case "Laravel", "WordPress", "Symfony", "PHP", "Static", "":
+	case "Laravel", "WordPress", "Symfony", "CodeIgniter", "Yii", "CakePHP", "Drupal", "PHP", "Static", "":
 		return false
 	}
 	return true
@@ -139,10 +144,31 @@ func ListProjects() ([]Project, error) {
 	if err := json.Unmarshal(data, &projects); err != nil {
 		return nil, err
 	}
+	hosts := hostsFileDomains()
 	for i := range projects {
 		projects[i].fillDefaults()
+		projects[i].HostsRegistered = hosts[strings.ToLower(projects[i].Domain)]
 	}
 	return projects, nil
+}
+
+// hostsFileDomains reads the hosts file once and returns every mapped name.
+func hostsFileDomains() map[string]bool {
+	out := map[string]bool{}
+	data, err := platform.ReadHostsFile()
+	if err != nil {
+		return out
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if i := strings.Index(line, "#"); i >= 0 {
+			line = line[:i]
+		}
+		f := strings.Fields(line)
+		for _, name := range f[min(1, len(f)):] {
+			out[strings.ToLower(name)] = true
+		}
+	}
+	return out
 }
 
 // SaveProjects writes all projects to projects.json
@@ -235,6 +261,28 @@ func DetectFramework(projectPath string) string {
 	// Symfony
 	if fileExists(filepath.Join(projectPath, "symfony.lock")) {
 		return "Symfony"
+	}
+
+	// CodeIgniter 4 (spark CLI + app/Config) or 3 (system/core)
+	if fileExists(filepath.Join(projectPath, "spark")) ||
+		fileExists(filepath.Join(projectPath, "system", "core", "CodeIgniter.php")) {
+		return "CodeIgniter"
+	}
+
+	// Yii 2
+	if fileExists(filepath.Join(projectPath, "yii")) && fileExists(filepath.Join(projectPath, "composer.json")) {
+		return "Yii"
+	}
+
+	// CakePHP
+	if fileExists(filepath.Join(projectPath, "bin", "cake")) {
+		return "CakePHP"
+	}
+
+	// Drupal
+	if fileExists(filepath.Join(projectPath, "web", "core", "lib", "Drupal.php")) ||
+		fileExists(filepath.Join(projectPath, "core", "lib", "Drupal.php")) {
+		return "Drupal"
 	}
 
 	// Next.js
@@ -415,6 +463,19 @@ func SetProjectWebserver(name, ws string) error {
 		}
 	}
 	return nil
+}
+
+// DocumentRoot returns the directory a web server should serve for a project:
+// the first conventional front-controller folder that exists (Laravel/Symfony/
+// CI4 public, CakePHP webroot, Yii/Drupal web, htdocs), else the project root.
+func DocumentRoot(projectPath string) string {
+	for _, sub := range []string{"public", "webroot", "web", "htdocs", "public_html"} {
+		dir := filepath.Join(projectPath, sub)
+		if fileExists(filepath.Join(dir, "index.php")) || fileExists(filepath.Join(dir, "index.html")) {
+			return dir
+		}
+	}
+	return projectPath
 }
 
 func fileExists(path string) bool {

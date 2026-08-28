@@ -376,6 +376,7 @@
   "tools.upToDate": "Güncel",
 
   "projects.publicHostname": "Genel alan adı",
+  "projects.domainNotRegistered": "Alan adı henüz hosts dosyasında değil — kaydetmek için tıklayın (bir kez yönetici onayı ister)",
   "projects.envHintsTitle": "Bu .env değerleri hâlâ localhost'u gösteriyor — uygulama, {0} (ve tünel) ziyaretçilerini alan adında tutmak yerine oraya yönlendirir:",
   "projects.envHintsFix": "Düzelt, hepsini https://{0} / {0} yapar (yedek: .env.devbox-backup).",
   "projects.envHintsFixBtn": ".env dosyasını düzelt",

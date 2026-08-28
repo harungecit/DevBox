@@ -376,6 +376,7 @@
   "tools.upToDate": "Up to date",
 
   "projects.publicHostname": "Public hostname",
+  "projects.domainNotRegistered": "Domain is not in the hosts file yet — click to register it (asks for admin rights once)",
   "projects.envHintsTitle": "These .env values still point at localhost — the app will redirect visitors of {0} (and of a tunnel) there instead of staying on the domain:",
   "projects.envHintsFix": "Fix rewrites them to https://{0} / {0} (backup: .env.devbox-backup).",
   "projects.envHintsFixBtn": "Fix .env",

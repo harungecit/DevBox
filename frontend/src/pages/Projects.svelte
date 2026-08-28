@@ -55,6 +55,7 @@
     runtimeVersion?: string; // pinned version; empty = use global active
     webserver?: string;      // auto / nginx / caddy / apache / frankenphp / devserver
     publicHostname?: string; // custom-domain tunnel hostname (needs linked Cloudflare)
+    hostsRegistered?: boolean; // domain actually mapped in the hosts file
   }
 
   interface TemplateInfo {
@@ -728,6 +729,10 @@
       'Django': 'bg-green-600/10 text-green-600 border-green-600/20',
       'Python': 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20',
       'Symfony': 'bg-slate-600/10 text-slate-500 border-slate-600/20',
+      'CodeIgniter': 'bg-orange-500/10 text-orange-600 border-orange-500/20',
+      'Yii': 'bg-blue-600/10 text-blue-600 border-blue-600/20',
+      'CakePHP': 'bg-red-500/10 text-red-600 border-red-500/20',
+      'Drupal': 'bg-sky-600/10 text-sky-600 border-sky-600/20',
       'PHP': 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20',
       'Static': 'bg-gray-500/10 text-gray-500 border-gray-500/20',
     };
@@ -1239,7 +1244,14 @@
                 <div class="flex items-center gap-3 mt-1">
                   <span class="text-xs text-[var(--color-text-secondary)] font-mono truncate">{proj.path}</span>
                   {#if proj.domain}
-                    <span class="text-xs font-mono text-primary-500 font-bold">{proj.domain}</span>
+                    {#if proj.hostsRegistered}
+                      <span class="text-xs font-mono text-primary-500 font-bold">{proj.domain}</span>
+                    {:else}
+                      <button class="text-xs font-mono text-red-500 font-bold hover:underline flex items-center gap-1" on:click={() => setupDomain(proj.name)} title={$t('projects.domainNotRegistered')}>
+                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        {proj.domain}
+                      </button>
+                    {/if}
                   {/if}
                   {#if isAppServer(proj.framework) && proj.port > 0}
                     <span class="text-[10px] font-mono text-amber-500 font-bold">:{proj.port}</span>

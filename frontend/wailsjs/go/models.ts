@@ -335,6 +335,7 @@ export namespace project {
 	    runtimeVersion?: string;
 	    webserver?: string;
 	    publicHostname?: string;
+	    hostsRegistered: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Project(source);
@@ -353,6 +354,7 @@ export namespace project {
 	        this.runtimeVersion = source["runtimeVersion"];
 	        this.webserver = source["webserver"];
 	        this.publicHostname = source["publicHostname"];
+	        this.hostsRegistered = source["hostsRegistered"];
 	    }
 	}
 

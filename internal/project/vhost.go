@@ -82,13 +82,7 @@ func GenerateNginxVhost(project Project, phpCgiPort int, httpPort int) error {
 	os.MkdirAll(vhostDir, 0755)
 
 	confPath := filepath.Join(vhostDir, project.Name+".conf")
-	docRoot := strings.ReplaceAll(project.Path, "\\", "/")
-
-	// Determine if there's a public/ subdirectory (Laravel, Symfony, etc.)
-	publicDir := filepath.Join(project.Path, "public")
-	if _, err := os.Stat(publicDir); err == nil {
-		docRoot = strings.ReplaceAll(publicDir, "\\", "/")
-	}
+	docRoot := strings.ReplaceAll(DocumentRoot(project.Path), "\\", "/")
 
 	if httpPort <= 0 {
 		httpPort = 80
@@ -163,12 +157,7 @@ func GenerateApacheVhost(project Project, httpPort int, phpCgiPort int) error {
 	}
 
 	confPath := filepath.Join(vhostDir, "vhost-"+project.Name+".conf")
-	docRoot := strings.ReplaceAll(project.Path, "\\", "/")
-
-	publicDir := filepath.Join(project.Path, "public")
-	if _, err := os.Stat(publicDir); err == nil {
-		docRoot = strings.ReplaceAll(publicDir, "\\", "/")
-	}
+	docRoot := strings.ReplaceAll(DocumentRoot(project.Path), "\\", "/")
 
 	var conf string
 	if IsAppServer(project.Framework) && project.Port > 0 {
@@ -216,12 +205,7 @@ func RemoveApacheVhost(projectName string) {
 // GenerateCaddyVhost creates a Caddy site block for a project
 func GenerateCaddyVhost(project Project, phpCgiPort int) error {
 	base := filepath.Join(config.GetDataDir(), "services", "caddy")
-	docRoot := strings.ReplaceAll(project.Path, "\\", "/")
-
-	publicDir := filepath.Join(project.Path, "public")
-	if _, err := os.Stat(publicDir); err == nil {
-		docRoot = strings.ReplaceAll(publicDir, "\\", "/")
-	}
+	docRoot := strings.ReplaceAll(DocumentRoot(project.Path), "\\", "/")
 
 	var conf string
 	if IsAppServer(project.Framework) && project.Port > 0 {
@@ -315,11 +299,7 @@ func GenerateFrankenPHPVhost(p Project) error {
 		return err
 	}
 
-	docRoot := strings.ReplaceAll(p.Path, "\\", "/")
-	publicDir := filepath.Join(p.Path, "public")
-	if _, err := os.Stat(publicDir); err == nil {
-		docRoot = strings.ReplaceAll(publicDir, "\\", "/")
-	}
+	docRoot := strings.ReplaceAll(DocumentRoot(p.Path), "\\", "/")
 
 	listen := fmt.Sprintf(":%d", frankenphpListenPort())
 	var addrs []string
