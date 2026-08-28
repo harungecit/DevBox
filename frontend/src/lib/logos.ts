@@ -22,6 +22,8 @@ import redisSvg from '../assets/images/icons/redis-icon.svg?raw';
 // @ts-ignore
 import valkeySvg from '../assets/images/icons/valkey-icon.svg?raw';
 // @ts-ignore
+import frankenphpSvg from '../assets/images/icons/frankenphp-icon.svg?raw';
+// @ts-ignore
 import mailpitSvg from '../assets/images/icons/mailpit-icon.svg?raw';
 // @ts-ignore
 import goSvg from '../assets/images/icons/golang-icon.svg?raw';
@@ -109,6 +111,7 @@ export const serviceLogos: Record<string, string> = {
   nginx: sanitize(nginxSvg, 'nx'),
   apache: sanitize(apacheSvg, 'ap'),
   caddy: sanitize(caddySvg, 'cd'),
+  frankenphp: sanitize(frankenphpSvg, 'fp'),
   postgres: sanitize(postgresSvg, 'pg'),
   mysql: sanitize(mysqlSvg, 'my'),
   mariadb: sanitize(mariadbSvg, 'mdb'),
