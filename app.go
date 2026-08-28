@@ -1680,6 +1680,9 @@ func (a *App) SetupProjectDomain(name string) error {
 			if ws := project.ResolveWebserver(p); ws == "" {
 				return fmt.Errorf("no web server installed")
 			}
+			if project.SyncLaravelAppURL(p) {
+				debugLog("SetupProjectDomain: APP_URL of %s synced to its domain", p.Name)
+			}
 			a.regenerateAllVhosts()
 			return nil
 		}
@@ -1710,6 +1713,7 @@ func (a *App) ToggleProjectSSL(name string, enable bool) error {
 			if err := project.SaveProjects(projects); err != nil {
 				return err
 			}
+			project.SyncLaravelAppURL(projects[i])
 			a.regenerateAllVhosts()
 			return nil
 		}
