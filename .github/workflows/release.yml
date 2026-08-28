@@ -102,6 +102,29 @@ jobs:
           ls -la build/bin
           test -f build/bin/DevBox-amd64-installer.exe || { echo "::error::NSIS installer was not produced"; exit 1; }
 
+      # Option B: Azure Trusted Signing (no certificate file to manage; ~$10/month).
+      # Secrets: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
+      #          TRUSTED_SIGNING_ENDPOINT (e.g. https://weu.codesigning.azure.net),
+      #          TRUSTED_SIGNING_ACCOUNT, TRUSTED_SIGNING_PROFILE
+      - name: Code-sign with Azure Trusted Signing (only when configured)
+        if: ${{ env.TS_ACCOUNT != '' }}
+        env:
+          TS_ACCOUNT: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.TRUSTED_SIGNING_PROFILE }}
+          files-folder: build/bin
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      # Option A: classic .pfx certificate.
       - name: Code-sign (only when a certificate is configured)
         if: ${{ env.CERT != '' }}
         env:

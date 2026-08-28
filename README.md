@@ -79,7 +79,7 @@ Full guide: <https://devbox.harungecit.dev/#usage>
 ## Security & signing
 
 - Every release is built by the public [`release.yml`](.github/workflows/release.yml) workflow from the tagged source, after `go vet`, unit tests and `svelte-check` pass. `SHA256SUMS-windows.txt` is attached to each release.
-- DevBox is not yet signed with a paid Authenticode certificate, so SmartScreen may show *“Windows protected your PC”* on first run. The workflow already supports signing: add `WINDOWS_CERT_PFX_BASE64` and `WINDOWS_CERT_PASSWORD` secrets and builds are signed automatically. SmartScreen reputation also accrues over time as more people install the same signed binary.
+- DevBox is not yet signed with a paid Authenticode certificate, so SmartScreen may show *“Windows protected your PC”* on first run (More info → Run anyway). The workflow already supports signing two ways — a `.pfx` certificate (`WINDOWS_CERT_PFX_BASE64` + `WINDOWS_CERT_PASSWORD`) or [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) (`AZURE_*` + `TRUSTED_SIGNING_*` secrets) — add the secrets and every build is signed automatically. SmartScreen reputation then accrues as people install the signed binary. Open-source projects can also apply for free signing at [SignPath Foundation](https://signpath.org/).
 - Elevation is requested only for the hosts file and (first start) for the front-door proxy binding port 80; both show a UAC prompt.
 - DevBox sends no telemetry. See the [privacy policy](https://devbox.harungecit.dev/privacy.html) for the full list of network connections.
 

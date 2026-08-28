@@ -19,6 +19,7 @@
     <a href="#features"><span data-lang="en">Features</span><span data-lang="tr">Özellikler</span></a>
     <a href="#install"><span data-lang="en">Install</span><span data-lang="tr">Kurulum</span></a>
     <a href="#usage"><span data-lang="en">Guide</span><span data-lang="tr">Kılavuz</span></a>
+    <a href="#cloudflare">Cloudflare</a>
     <a href="#faq">FAQ</a>
     <a href="https://github.com/harungecit/DevBox">GitHub</a>
     <div class="lang"><button data-set="en">EN</button><button data-set="tr">TR</button></div>
@@ -91,6 +92,33 @@
     <div class="note ok" style="margin-top:20px">
       <span data-lang="en"><b>Tip:</b> right-click the tray icon for Start all / Stop all / Quit. Closing the window keeps everything running.</span>
       <span data-lang="tr"><b>İpucu:</b> tepsi simgesine sağ tıklayın: Tümünü başlat / Tümünü durdur / Çık. Pencereyi kapatmak her şeyi çalışır halde bırakır.</span>
+    </div>
+  </section>
+
+  <section id="cloudflare">
+    <h2 data-lang="en">Share on your own domain with Cloudflare</h2><h2 data-lang="tr">Cloudflare ile kendi alan adında paylaş</h2>
+    <p class="sub" data-lang="en">Quick tunnels need nothing — one click gives you a random <code>*.trycloudflare.com</code> link. For a permanent <code>app.yourdomain.com</code> you link a Cloudflare account once. Free plan is enough; your domain must use Cloudflare DNS.</p>
+    <p class="sub" data-lang="tr">Hızlı tüneller için hiçbir şey gerekmez — tek tıkla rastgele bir <code>*.trycloudflare.com</code> bağlantısı alırsınız. Kalıcı bir <code>uygulama.alanadiniz.com</code> için Cloudflare hesabınızı bir kez bağlarsınız. Ücretsiz plan yeterlidir; alan adınızın DNS'i Cloudflare'de olmalıdır.</p>
+    <div class="steps">
+      <div class="step"><div><h3 data-lang="en">Create an API token</h3><h3 data-lang="tr">API token oluştur</h3><p data-lang="en">Go to <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">dash.cloudflare.com → My Profile → API Tokens</a> → <b>Create Token</b> → <b>Create Custom Token</b>. Give it a name like <code>DevBox</code>.</p><p data-lang="tr"><a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">dash.cloudflare.com → My Profile → API Tokens</a> → <b>Create Token</b> → <b>Create Custom Token</b>. Adını <code>DevBox</code> gibi verin.</p></div></div>
+      <div class="step"><div><h3 data-lang="en">Set exactly these permissions</h3><h3 data-lang="tr">Tam olarak şu izinleri ver</h3>
+        <table style="margin:8px 0 6px"><tr><th data-lang="en">Type</th><th data-lang="tr">Tür</th><th data-lang="en">Item</th><th data-lang="tr">Öğe</th><th data-lang="en">Permission</th><th data-lang="tr">İzin</th></tr>
+        <tr><td>Account</td><td>Cloudflare Tunnel</td><td>Edit</td></tr><tr><td>Zone</td><td>DNS</td><td>Edit</td></tr><tr><td>Zone</td><td>Zone</td><td>Read</td></tr></table>
+        <p data-lang="en">Under <b>Zone Resources</b> pick <i>Specific zone → your domain</i> (or All zones). Leave IP filtering and TTL as they are, click <b>Continue to summary → Create Token</b>, then copy the token — Cloudflare shows it only once.</p><p data-lang="tr"><b>Zone Resources</b> altında <i>Specific zone → alan adınız</i> (veya All zones) seçin. IP filtresi ve TTL'i olduğu gibi bırakın, <b>Continue to summary → Create Token</b> deyin ve token'ı kopyalayın — Cloudflare bunu yalnızca bir kez gösterir.</p></div></div>
+      <div class="step"><div><h3 data-lang="en">Link it in DevBox</h3><h3 data-lang="tr">DevBox'a bağla</h3><p data-lang="en"><b>Settings → Cloudflare — custom domain tunnels</b> → paste the token → <b>Verify</b>. Pick the account and the domain (zone) from the lists → <b>Link account</b>. DevBox creates one tunnel for this computer (<code>devbox-&lt;pc-name&gt;</code>) in your account; nothing else changes yet.</p><p data-lang="tr"><b>Ayarlar → Cloudflare — özel alan adı tünelleri</b> → token'ı yapıştırın → <b>Doğrula</b>. Listeden hesabı ve alan adını (zone) seçin → <b>Hesabı bağla</b>. DevBox bu bilgisayar için hesabınızda tek bir tünel oluşturur (<code>devbox-&lt;pc-adı&gt;</code>); başka hiçbir şey değişmez.</p></div></div>
+      <div class="step"><div><h3 data-lang="en">Give a project a public hostname</h3><h3 data-lang="tr">Projeye genel alan adı ver</h3><p data-lang="en"><b>Projects</b> → gear icon on the project → <b>Public hostname</b> → e.g. <code>demo.yourdomain.com</code> → Enter. Now the share icon publishes to that address: DevBox adds the DNS record and the routing rule for you. Stopping the tunnel removes both.</p><p data-lang="tr"><b>Projeler</b> → projedeki dişli simgesi → <b>Genel alan adı</b> → örn. <code>demo.alanadiniz.com</code> → Enter. Artık paylaş simgesi o adrese yayınlar: DNS kaydını ve yönlendirme kuralını DevBox ekler. Tüneli durdurmak ikisini de kaldırır.</p></div></div>
+    </div>
+    <div class="note" style="margin-top:16px"><span data-lang="en"><b>Where is the token stored?</b> Only in <code>C:\DevBox\config.json</code> on your machine; it is sent to <code>api.cloudflare.com</code> and nowhere else. <b>Settings → Unlink</b> removes it and deletes every DNS record DevBox created.</span><span data-lang="tr"><b>Token nerede saklanır?</b> Yalnızca bilgisayarınızdaki <code>C:\DevBox\config.json</code> içinde; yalnızca <code>api.cloudflare.com</code>'a gönderilir. <b>Ayarlar → Bağlantıyı kaldır</b> token'ı siler ve DevBox'ın oluşturduğu tüm DNS kayıtlarını kaldırır.</span></div>
+  </section>
+
+  <section id="security">
+    <h2 data-lang="en">Why does Windows warn about an “unknown publisher”?</h2><h2 data-lang="tr">Windows neden “bilinmeyen yayıncı” uyarısı veriyor?</h2>
+    <p class="sub" data-lang="en">SmartScreen judges files by two things: a code-signing certificate and download reputation. DevBox is a brand-new open-source project — it does not carry a paid certificate yet and has not accumulated reputation, so Windows shows the generic warning. It is not a virus verdict.</p>
+    <p class="sub" data-lang="tr">SmartScreen bir dosyayı iki şeye göre değerlendirir: kod imzalama sertifikası ve indirme itibarı. DevBox yepyeni bir açık kaynak proje — henüz ücretli bir sertifikası yok ve itibar biriktirmedi; bu yüzden Windows genel uyarıyı gösterir. Bu bir virüs kararı değildir.</p>
+    <div class="grid">
+      <div class="card"><div class="icon">🔍</div><h3 data-lang="en">Verify what you downloaded</h3><h3 data-lang="tr">İndirdiğini doğrula</h3><p data-lang="en">Every release ships <code>SHA256SUMS-windows.txt</code>. In PowerShell: <code>Get-FileHash .\DevBox-Setup-*.exe</code> and compare the hash with the file on the release page. Builds are produced by a public GitHub Actions workflow you can read line by line.</p><p data-lang="tr">Her sürümde <code>SHA256SUMS-windows.txt</code> bulunur. PowerShell'de <code>Get-FileHash .\DevBox-Setup-*.exe</code> çalıştırın ve sonucu sürüm sayfasındaki dosyayla karşılaştırın. Yapılar, satır satır okuyabileceğiniz herkese açık bir GitHub Actions iş akışıyla üretilir.</p></div>
+      <div class="card"><div class="icon">▶</div><h3 data-lang="en">Run it anyway (safely)</h3><h3 data-lang="tr">Yine de çalıştır (güvenle)</h3><p data-lang="en">On the blue SmartScreen dialog click <b>More info</b>, then <b>Run anyway</b>. You only see this once per download; updates installed from inside DevBox are downloaded straight from GitHub Releases.</p><p data-lang="tr">Mavi SmartScreen penceresinde <b>Daha fazla bilgi</b>, ardından <b>Yine de çalıştır</b>'a tıklayın. Bunu her indirme için yalnızca bir kez görürsünüz; DevBox içinden kurulan güncellemeler doğrudan GitHub Releases'tan indirilir.</p></div>
+      <div class="card"><div class="icon">✍</div><h3 data-lang="en">Signing is on the roadmap</h3><h3 data-lang="tr">İmzalama yol haritasında</h3><p data-lang="en">The release pipeline already supports Authenticode signing (certificate file or Azure Trusted Signing). As soon as a certificate is in place every build is signed automatically and the warning disappears; reputation then builds with each install.</p><p data-lang="tr">Sürüm hattı Authenticode imzalamayı zaten destekliyor (sertifika dosyası veya Azure Trusted Signing). Sertifika sağlandığı anda her yapı otomatik imzalanır ve uyarı kaybolur; itibar da her kurulumla birikir.</p></div>
     </div>
   </section>
 
