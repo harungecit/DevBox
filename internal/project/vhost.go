@@ -93,11 +93,18 @@ func GenerateNginxVhost(project Project, phpCgiPort int, httpPort int) error {
 		keyFile := strings.ReplaceAll(filepath.Join(certDir, project.Domain+"-key.pem"), "\\", "/")
 
 		conf := fmt.Sprintf(`# DevBox generated vhost for %s
-# HTTP -> HTTPS redirect
+# HTTP listener: plain browser hits are redirected to HTTPS; traffic that already
+# arrived over TLS upstream (front-door proxy / Cloudflare tunnel sets
+# X-Forwarded-Proto: https) is served here directly to avoid a redirect loop.
 server {
     listen %d;
     server_name %s;
-    return 301 https://$host$request_uri;
+
+    set $devbox_redirect 1;
+    if ($http_x_forwarded_proto = "https") { set $devbox_redirect 0; }
+    if ($http_cf_visitor ~ "https")        { set $devbox_redirect 0; }
+    if ($devbox_redirect) { return 301 https://$host$request_uri; }
+%s
 }
 
 # HTTPS server
@@ -108,7 +115,7 @@ server {
     ssl_certificate_key %s;
 %s
 }
-`, project.Name, httpPort, nginxHosts(project), nginxHosts(project), certFile, keyFile, locationBlock)
+`, project.Name, httpPort, nginxHosts(project), locationBlock, nginxHosts(project), certFile, keyFile, locationBlock)
 
 		return os.WriteFile(confPath, []byte(conf), 0644)
 	}

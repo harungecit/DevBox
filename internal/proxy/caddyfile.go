@@ -53,8 +53,10 @@ func WriteCaddyfile() error {
 		// Forward the original Host so the backend's own vhost routing picks the
 		// right project (nginx server_name, FrankenPHP host matcher, etc.).
 		sb.WriteString("\t\theader_up Host {host}\n")
-		sb.WriteString("\t\theader_up X-Forwarded-For {remote_host}\n")
-		sb.WriteString("\t\theader_up X-Forwarded-Proto {scheme}\n")
+		// cloudflared connects from loopback and already carries the visitor's
+		// X-Forwarded-Proto (https); trusting loopback keeps it intact instead of
+		// downgrading it to "http" (which would make SSL vhosts redirect-loop).
+		sb.WriteString("\t\ttrusted_proxies private_ranges\n")
 		sb.WriteString("\t}\n")
 		sb.WriteString("}\n\n")
 	}

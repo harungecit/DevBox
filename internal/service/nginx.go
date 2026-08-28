@@ -314,6 +314,12 @@ func (n *NginxManager) Start() error {
 
 	port := n.Port()
 	if IsPortInUse(port) {
+		// An orphaned worker from a previous DevBox session is the usual culprit.
+		if killOrphanedProcesses(serviceBaseDir("nginx"), platform.BinaryName("nginx")) > 0 {
+			WaitForPortRelease(port, 5)
+		}
+	}
+	if IsPortInUse(port) {
 		return fmt.Errorf("port %d is already in use - change the port in service settings or stop the conflicting service", port)
 	}
 
@@ -350,10 +356,6 @@ func (n *NginxManager) Start() error {
 }
 
 func (n *NginxManager) Stop() error {
-	if !IsRunning("nginx") {
-		return nil
-	}
-
 	base := serviceBaseDir("nginx")
 	var exe string
 	if goruntime.GOOS == "darwin" {
@@ -362,8 +364,16 @@ func (n *NginxManager) Stop() error {
 		exe = filepath.Join(base, platform.BinaryName("nginx"))
 	}
 
-	runCommandSilent(exe, []string{"-s", "stop"}, base)
-	return StopProcess("nginx")
+	if IsRunning("nginx") {
+		runCommandSilent(exe, []string{"-s", "stop"}, base)
+		StopProcess("nginx")
+	}
+	// Windows nginx runs a master + worker; killing the master leaves the
+	// worker holding the port with the OLD configuration — every restart would
+	// then fail with "port in use" while stale vhosts keep being served.
+	killOrphanedProcesses(base, platform.BinaryName("nginx"))
+	WaitForPortRelease(n.Port(), 5)
+	return nil
 }
 
 func (n *NginxManager) Restart() error {
