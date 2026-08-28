@@ -79,9 +79,13 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install Wails CLI and NSIS
+        shell: bash
         run: |
           go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
           choco install nsis -y --no-progress
+          # choco only updates PATH for new shells — expose makensis to later steps.
+          echo 'C:\Program Files (x86)\NSIS' >> "$GITHUB_PATH"
+          echo 'C:\Program Files (x86)\NSIS\Bin' >> "$GITHUB_PATH"
 
       - name: Stamp version into wails.json (installer metadata)
         shell: bash
@@ -93,8 +97,10 @@ jobs:
         shell: bash
         run: |
           V="${{ steps.meta.outputs.version }}"
+          makensis -VERSION
           wails build -clean -nsis -ldflags "-X DevBox/internal/updater.Version=$V"
           ls -la build/bin
+          test -f build/bin/DevBox-amd64-installer.exe || { echo "::error::NSIS installer was not produced"; exit 1; }
 
       - name: Code-sign (only when a certificate is configured)
         if: ${{ env.CERT != '' }}
