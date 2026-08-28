@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy Policy — DevBox</title>
+<link rel="icon" href="assets/icon.png"><link rel="stylesheet" href="assets/site.css"><script src="assets/site.js" defer></script>
+</head>
+<body>
+<header><div class="wrap nav"><a class="brand" href="./"><img src="assets/icon.png" alt="">DevBox</a><div class="links"><a href="./">Home</a><a href="terms.html"><span data-lang="en">Terms</span><span data-lang="tr">Şartlar</span></a><div class="lang"><button data-set="en">EN</button><button data-set="tr">TR</button></div></div></div></header>
+<main class="wrap legal" style="padding:48px 24px">
+  <div data-lang="en">
+    <h1>Privacy Policy</h1>
+    <p><i>Last updated: 28 August 2026</i></p>
+    <p>DevBox is a desktop application that runs entirely on your computer. This policy explains what data it touches and where that data goes. The short version: <b>DevBox does not collect, transmit or sell any personal data, and has no analytics or telemetry.</b></p>
+    <h2>Data stored on your computer</h2>
+    <ul>
+      <li>Everything DevBox manages — runtimes, services and their databases, project list, settings — is stored locally under <code>C:\DevBox</code> (or the folder you choose).</li>
+      <li>Your Windows user PATH is modified only to add/remove DevBox-managed runtime folders, and only when you install, switch or remove a runtime.</li>
+      <li>The hosts file is modified only when you register or remove a project domain; every write asks for administrator confirmation and is tagged <code># DevBox managed</code>.</li>
+    </ul>
+    <h2>Network connections DevBox makes</h2>
+    <p>DevBox contacts third-party servers only to do what you asked. It sends no identifiers beyond a standard <code>User-Agent</code> header.</p>
+    <ul>
+      <li><b>Downloading runtimes and services</b> from their official sources: go.dev, nodejs.org, windows.php.net, python.org, static.rust-lang.org, nginx.org, apachelounge.com, enterprisedb.com, cdn.mysql.com, archive.mariadb.org, fastdl.mongodb.org, github.com (release assets), getcomposer.org, xdebug.org, registry.npmjs.org.</li>
+      <li><b>Checking for new versions</b> of runtimes, services and DevBox itself (GitHub Releases API). Results are cached locally for 48 hours.</li>
+      <li><b>Cloudflare tunnels</b>, only when you click Share: the <code>cloudflared</code> connector forwards traffic for the project you chose to Cloudflare's network. Quick tunnels need no account. If you link your own Cloudflare account, DevBox calls the Cloudflare API to create a tunnel, DNS records and routing rules in <i>your</i> account. Cloudflare's own <a href="https://www.cloudflare.com/privacypolicy/">privacy policy</a> applies to that traffic.</li>
+    </ul>
+    <h2>Credentials</h2>
+    <p>A Cloudflare API token you enter is stored only in <code>C:\DevBox\config.json</code> on your machine and is sent exclusively to <code>api.cloudflare.com</code>. You can remove it at any time from Settings → Cloudflare → Unlink. DevBox never sends it anywhere else.</p>
+    <h2>Third-party software</h2>
+    <p>Runtimes and services installed through DevBox are independent open-source or vendor products with their own licences and behaviour (for example, some may check for updates on their own). DevBox configures them for local development (bound to <code>127.0.0.1</code>) but does not control their code.</p>
+    <h2>Website</h2>
+    <p>This website is static, hosted on GitHub Pages, and sets no cookies. It stores your language preference in your browser's local storage. GitHub may log standard access data; see <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement">GitHub's privacy statement</a>.</p>
+    <h2>Children</h2>
+    <p>DevBox is a developer tool and is not directed at children.</p>
+    <h2>Changes &amp; contact</h2>
+    <p>Changes to this policy are published on this page with a new date. Questions: open an issue at <a href="https://github.com/harungecit/DevBox/issues">github.com/harungecit/DevBox/issues</a>.</p>
+  </div>
+  <div data-lang="tr">
+    <h1>Gizlilik Politikası</h1>
+    <p><i>Son güncelleme: 28 Ağustos 2026</i></p>
+    <p>DevBox tamamen bilgisayarınızda çalışan bir masaüstü uygulamasıdır. Bu politika, uygulamanın hangi verilere dokunduğunu ve bu verilerin nereye gittiğini açıklar. Kısaca: <b>DevBox hiçbir kişisel veri toplamaz, iletmez veya satmaz; analitik veya telemetri içermez.</b></p>
+    <h2>Bilgisayarınızda saklanan veriler</h2>
+    <ul>
+      <li>DevBox'ın yönettiği her şey — çalışma zamanları, servisler ve veritabanları, proje listesi, ayarlar — yerel olarak <code>C:\DevBox</code> (veya seçtiğiniz klasör) altında saklanır.</li>
+      <li>Windows kullanıcı PATH'iniz yalnızca DevBox'ın yönettiği çalışma zamanı klasörlerini eklemek/kaldırmak için ve yalnızca bir çalışma zamanı kurduğunuzda, değiştirdiğinizde veya kaldırdığınızda değiştirilir.</li>
+      <li>hosts dosyası yalnızca bir proje alan adı kaydettiğinizde veya kaldırdığınızda değiştirilir; her yazma yönetici onayı ister ve <code># DevBox managed</code> etiketiyle işaretlenir.</li>
+    </ul>
+    <h2>DevBox'ın kurduğu ağ bağlantıları</h2>
+    <p>DevBox üçüncü taraf sunuculara yalnızca sizin istediğiniz işi yapmak için bağlanır. Standart bir <code>User-Agent</code> başlığı dışında hiçbir tanımlayıcı göndermez.</p>
+    <ul>
+      <li><b>Çalışma zamanı ve servis indirme</b>, resmi kaynaklardan: go.dev, nodejs.org, windows.php.net, python.org, static.rust-lang.org, nginx.org, apachelounge.com, enterprisedb.com, cdn.mysql.com, archive.mariadb.org, fastdl.mongodb.org, github.com (sürüm dosyaları), getcomposer.org, xdebug.org, registry.npmjs.org.</li>
+      <li><b>Yeni sürüm denetimi</b>: çalışma zamanları, servisler ve DevBox'ın kendisi için (GitHub Releases API). Sonuçlar 48 saat yerelde önbelleklenir.</li>
+      <li><b>Cloudflare tünelleri</b>, yalnızca Paylaş'a tıkladığınızda: <code>cloudflared</code> bağlayıcısı seçtiğiniz projenin trafiğini Cloudflare ağına iletir. Hızlı tüneller hesap gerektirmez. Kendi Cloudflare hesabınızı bağlarsanız DevBox, <i>sizin</i> hesabınızda tünel, DNS kayıtları ve yönlendirme kuralları oluşturmak için Cloudflare API'sini çağırır. Bu trafik için Cloudflare'in kendi <a href="https://www.cloudflare.com/privacypolicy/">gizlilik politikası</a> geçerlidir.</li>
+    </ul>
+    <h2>Kimlik bilgileri</h2>
+    <p>Girdiğiniz Cloudflare API token'ı yalnızca bilgisayarınızdaki <code>C:\DevBox\config.json</code> dosyasında saklanır ve yalnızca <code>api.cloudflare.com</code> adresine gönderilir. Ayarlar → Cloudflare → Bağlantıyı kaldır ile istediğiniz zaman silebilirsiniz. DevBox bu token'ı başka hiçbir yere göndermez.</p>
+    <h2>Üçüncü taraf yazılımlar</h2>
+    <p>DevBox aracılığıyla kurulan çalışma zamanları ve servisler, kendi lisansları ve davranışları olan bağımsız açık kaynak veya üretici ürünleridir (örneğin bazıları kendi başına güncelleme denetleyebilir). DevBox bunları yerel geliştirme için yapılandırır (<code>127.0.0.1</code>'e bağlı) ancak kodlarını denetlemez.</p>
+    <h2>Web sitesi</h2>
+    <p>Bu web sitesi statiktir, GitHub Pages üzerinde barındırılır ve çerez kullanmaz. Dil tercihinizi tarayıcınızın yerel depolamasında saklar. GitHub standart erişim verilerini kaydedebilir; bkz. <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement">GitHub gizlilik bildirimi</a>.</p>
+    <h2>Çocuklar</h2>
+    <p>DevBox bir geliştirici aracıdır ve çocuklara yönelik değildir.</p>
+    <h2>Değişiklikler ve iletişim</h2>
+    <p>Bu politikadaki değişiklikler yeni bir tarihle bu sayfada yayınlanır. Sorular için: <a href="https://github.com/harungecit/DevBox/issues">github.com/harungecit/DevBox/issues</a>.</p>
+  </div>
+</main>
+<footer><div class="wrap cols"><div>© 2026 Harun Geçit · MIT License</div><div><a href="./">DevBox</a></div></div></footer>
+</body></html>

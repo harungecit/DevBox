@@ -7,10 +7,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strings"
 	"sync"
-	"syscall"
 
+	"DevBox/internal/platform"
 	"DevBox/internal/runtime"
 )
 
@@ -156,14 +157,14 @@ func scaffoldGo(parentDir, name string, progress chan<- ScaffoldProgress) error 
 	mgr := runtime.Registry["go"]
 	ver, _ := mgr.GetGlobal()
 	binDir := mgr.BinaryPath(ver)
-	goExe := filepath.Join(binDir, "go.exe")
+	goExe := filepath.Join(binDir, platform.BinaryName("go"))
 
 	progress <- ScaffoldProgress{Percent: -1, Message: "Running go mod init..."}
 
 	cmd := exec.Command(goExe, "mod", "init", name)
 	cmd.Dir = projectPath
 	cmd.Env = buildEnv(binDir)
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x00000200 | 0x08000000} // CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+	platform.SetProcessAttrs(cmd, true, true)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("go mod init failed: %s\n%s", err, string(out))
 	}
@@ -218,7 +219,7 @@ func scaffoldPHPComposer(parentDir, name string, progress chan<- ScaffoldProgres
 	mgr := runtime.Registry["php"]
 	ver, _ := mgr.GetGlobal()
 	binDir := mgr.BinaryPath(ver)
-	phpExe := filepath.Join(binDir, "php.exe")
+	phpExe := filepath.Join(binDir, platform.BinaryName("php"))
 	composerPhar := filepath.Join(binDir, "composer.phar")
 
 	progress <- ScaffoldProgress{Percent: -1, Message: "Running composer init..."}
@@ -229,7 +230,7 @@ func scaffoldPHPComposer(parentDir, name string, progress chan<- ScaffoldProgres
 	)
 	cmd.Dir = projectPath
 	cmd.Env = buildEnv(binDir)
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x00000200 | 0x08000000}
+	platform.SetProcessAttrs(cmd, true, true)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("composer init failed: %s\n%s", err, string(out))
 	}
@@ -253,43 +254,43 @@ func scaffoldWithCommand(tmpl *FrameworkTemplate, parentDir, projectName string,
 
 	switch tmpl.ID {
 	case "laravel":
-		phpExe := filepath.Join(binDir, "php.exe")
+		phpExe := filepath.Join(binDir, platform.BinaryName("php"))
 		composerPhar := filepath.Join(binDir, "composer.phar")
 		cmdName = phpExe
 		args = []string{composerPhar, "create-project", "laravel/laravel", projectName}
 	case "symfony":
-		phpExe := filepath.Join(binDir, "php.exe")
+		phpExe := filepath.Join(binDir, platform.BinaryName("php"))
 		composerPhar := filepath.Join(binDir, "composer.phar")
 		cmdName = phpExe
 		args = []string{composerPhar, "create-project", "symfony/skeleton", projectName}
 	case "wordpress":
-		phpExe := filepath.Join(binDir, "php.exe")
+		phpExe := filepath.Join(binDir, platform.BinaryName("php"))
 		composerPhar := filepath.Join(binDir, "composer.phar")
 		cmdName = phpExe
 		args = []string{composerPhar, "create-project", "johnpbloch/wordpress", projectName}
 	case "nextjs":
-		cmdName = filepath.Join(binDir, "npx.cmd")
+		cmdName = filepath.Join(binDir, platform.ScriptName("npx"))
 		args = []string{"create-next-app@latest", projectName, "--use-npm"}
 	case "nuxt":
-		cmdName = filepath.Join(binDir, "npx.cmd")
+		cmdName = filepath.Join(binDir, platform.ScriptName("npx"))
 		args = []string{"nuxi@latest", "init", projectName}
 	case "vue":
-		cmdName = filepath.Join(binDir, "npm.cmd")
+		cmdName = filepath.Join(binDir, platform.ScriptName("npm"))
 		args = []string{"create", "vite@latest", projectName, "--", "--template", "vue"}
 	case "react":
-		cmdName = filepath.Join(binDir, "npm.cmd")
+		cmdName = filepath.Join(binDir, platform.ScriptName("npm"))
 		args = []string{"create", "vite@latest", projectName, "--", "--template", "react"}
 	case "svelte":
-		cmdName = filepath.Join(binDir, "npm.cmd")
+		cmdName = filepath.Join(binDir, platform.ScriptName("npm"))
 		args = []string{"create", "vite@latest", projectName, "--", "--template", "svelte"}
 	case "angular":
-		cmdName = filepath.Join(binDir, "npx.cmd")
+		cmdName = filepath.Join(binDir, platform.ScriptName("npx"))
 		args = []string{"@angular/cli", "new", projectName, "--skip-git", "--defaults"}
 	case "rust":
-		cmdName = filepath.Join(binDir, "cargo.exe")
+		cmdName = filepath.Join(binDir, platform.BinaryName("cargo"))
 		args = []string{"init", projectName}
 	case "django":
-		cmdName = filepath.Join(binDir, "python.exe")
+		cmdName = filepath.Join(binDir, platform.BinaryName("python"))
 		args = []string{"-m", "django", "startproject", projectName}
 	default:
 		return fmt.Errorf("unsupported template: %s", tmpl.ID)
@@ -298,7 +299,7 @@ func scaffoldWithCommand(tmpl *FrameworkTemplate, parentDir, projectName string,
 	cmd := exec.Command(cmdName, args...)
 	cmd.Dir = parentDir
 	cmd.Env = buildEnv(binDir)
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x00000200 | 0x08000000}
+	platform.SetProcessAttrs(cmd, true, true)
 
 	// Combine stdout and stderr
 	stdout, err := cmd.StdoutPipe()
@@ -353,7 +354,7 @@ func CloneProject(gitURL, parentDir, projectName string, progress chan<- Scaffol
 
 	cmd := exec.Command(gitExe, "clone", "--progress", gitURL, projectName)
 	cmd.Dir = parentDir
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x00000200 | 0x08000000}
+	platform.SetProcessAttrs(cmd, true, true)
 
 	// git clone progress goes to stderr
 	stderr, err := cmd.StderrPipe()
@@ -411,19 +412,31 @@ func IsGitInstalled() bool {
 
 // findGitExe locates the git executable
 func findGitExe() string {
-	// Try PATH first
 	if p, err := exec.LookPath("git"); err == nil {
 		return p
 	}
-	// Try common Windows paths
-	commonPaths := []string{
-		filepath.Join(os.Getenv("ProgramFiles"), "Git", "cmd", "git.exe"),
-		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Git", "cmd", "git.exe"),
-		filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Git", "cmd", "git.exe"),
-	}
-	for _, p := range commonPaths {
-		if _, err := os.Stat(p); err == nil {
-			return p
+	// Platform-specific common paths
+	if goruntime.GOOS == "windows" {
+		commonPaths := []string{
+			filepath.Join(os.Getenv("ProgramFiles"), "Git", "cmd", "git.exe"),
+			filepath.Join(os.Getenv("ProgramFiles(x86)"), "Git", "cmd", "git.exe"),
+			filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Git", "cmd", "git.exe"),
+		}
+		for _, p := range commonPaths {
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	} else {
+		commonPaths := []string{
+			"/usr/bin/git",
+			"/usr/local/bin/git",
+			"/opt/homebrew/bin/git",
+		}
+		for _, p := range commonPaths {
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
 		}
 	}
 	return ""

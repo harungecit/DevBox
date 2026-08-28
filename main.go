@@ -2,43 +2,23 @@ package main
 
 import (
 	"embed"
+	"os"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	"DevBox/internal/config"
+	"DevBox/internal/platform"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
-func main() {
-	app := NewApp()
-
-	err := wails.Run(&options.App{
-		Title:     "DevBox",
-		Width:     1100,
-		Height:    760,
-		MinWidth:  1050,
-		MinHeight: 700,
-		EnableDefaultContextMenu: false,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
-		},
-		BackgroundColour: &options.RGBA{R: 17, G: 24, B: 39, A: 1},
-		OnStartup:        app.startup,
-		OnShutdown:       app.shutdown,
-		Bind: []interface{}{
-			app,
-		},
-		Windows: &windows.Options{
-			WebviewIsTransparent: false,
-			WindowIsTranslucent:  false,
-			Theme:                windows.Dark,
-		},
-	})
-
-	if err != nil {
-		println("Error:", err.Error())
+// startHidden decides whether the window opens hidden in the tray: always when
+// the OS launched DevBox at login (--minimized), or when the user asked for it.
+func startHidden() bool {
+	for _, arg := range os.Args[1:] {
+		if arg == platform.AutoStartFlag {
+			return true
+		}
 	}
+	cfg, err := config.Load()
+	return err == nil && cfg != nil && cfg.StartMinimized
 }

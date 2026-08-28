@@ -5,18 +5,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
-	"syscall"
 
 	"DevBox/internal/config"
+	"DevBox/internal/platform"
 )
-
-// mkcert download URL
-const mkcertDownloadURL = "https://github.com/nicedoc/mkcert/releases/latest/download/mkcert-windows-amd64.exe"
 
 // mkcertPath returns the path to the mkcert executable
 func mkcertPath() string {
-	return filepath.Join(config.GetDataDir(), "tools", "mkcert", "mkcert.exe")
+	return filepath.Join(config.GetDataDir(), "tools", "mkcert", platform.BinaryName("mkcert"))
 }
 
 // IsMkcertInstalled checks if mkcert is available
@@ -30,6 +28,13 @@ func InstallMkcert() error {
 	toolDir := filepath.Dir(mkcertPath())
 	os.MkdirAll(toolDir, 0755)
 
+	if goruntime.GOOS == "darwin" {
+		return installMkcertDarwin()
+	}
+	return installMkcertWindows()
+}
+
+func installMkcertWindows() error {
 	// Try fetching from GitHub releases for FiloSottile/mkcert
 	downloadURL := "https://github.com/FiloSottile/mkcert/releases/latest/download/mkcert-v1.4.4-windows-amd64.exe"
 
@@ -39,7 +44,7 @@ func InstallMkcert() error {
 	// Simple download
 	cmd := exec.Command("powershell", "-Command",
 		fmt.Sprintf(`Invoke-WebRequest -Uri "%s" -OutFile "%s" -UseBasicParsing`, downloadURL, tmpFile))
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	platform.SetProcessAttrs(cmd, false, true)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to download mkcert: %w", err)
 	}
@@ -51,6 +56,23 @@ func InstallMkcert() error {
 	}
 	os.Remove(tmpFile)
 	return os.WriteFile(mkcertPath(), data, 0755)
+}
+
+func installMkcertDarwin() error {
+	arch := "amd64"
+	if goruntime.GOARCH == "arm64" {
+		arch = "arm64"
+	}
+	downloadURL := fmt.Sprintf("https://github.com/FiloSottile/mkcert/releases/latest/download/mkcert-v1.4.4-darwin-%s", arch)
+	dest := mkcertPath()
+
+	cmd := exec.Command("curl", "-fsSL", "-o", dest, downloadURL)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to download mkcert: %w", err)
+	}
+
+	os.Chmod(dest, 0755)
+	return nil
 }
 
 // SetupProjectSSL generates SSL certificates for a project domain using mkcert
@@ -70,7 +92,7 @@ func SetupProjectSSL(domain string) error {
 	// Run mkcert -install first (installs root CA if not done)
 	mkcert := mkcertPath()
 	installCmd := exec.Command(mkcert, "-install")
-	installCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	platform.SetProcessAttrs(installCmd, false, true)
 	installCmd.Run() // Ignore errors - may already be installed
 
 	// Generate certificate
@@ -80,7 +102,7 @@ func SetupProjectSSL(domain string) error {
 		domain,
 		"*."+domain,
 	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	platform.SetProcessAttrs(cmd, false, true)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("mkcert failed: %s - %w", strings.TrimSpace(string(out)), err)

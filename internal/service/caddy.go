@@ -4,14 +4,29 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
+
+	"DevBox/internal/platform"
 )
 
 const caddyMaxVersions = 5
 
-var caddyKnownVersions = []AvailableVersion{
-	{Version: "2.9.1", Label: "2.9.1 (Latest)", URL: "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_windows_amd64.zip"},
-	{Version: "2.8.4", Label: "2.8.4", URL: "https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_windows_amd64.zip"},
+func caddyKnownVersionsList() []AvailableVersion {
+	if goruntime.GOOS == "darwin" {
+		arch := "arm64"
+		if goruntime.GOARCH == "amd64" {
+			arch = "amd64"
+		}
+		return []AvailableVersion{
+			{Version: "2.9.1", Label: "2.9.1 (Latest)", URL: fmt.Sprintf("https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_darwin_%s.tar.gz", arch)},
+			{Version: "2.8.4", Label: "2.8.4", URL: fmt.Sprintf("https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_darwin_%s.tar.gz", arch)},
+		}
+	}
+	return []AvailableVersion{
+		{Version: "2.9.1", Label: "2.9.1 (Latest)", URL: "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_windows_amd64.zip"},
+		{Version: "2.8.4", Label: "2.8.4", URL: "https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_windows_amd64.zip"},
+	}
 }
 
 type CaddyManager struct{}
@@ -20,17 +35,17 @@ func NewCaddyManager() *CaddyManager { return &CaddyManager{} }
 
 func (c *CaddyManager) Name() string        { return "caddy" }
 func (c *CaddyManager) DisplayName() string  { return "Caddy" }
-func (c *CaddyManager) DefaultPort() int     { return 8080 }
+func (c *CaddyManager) DefaultPort() int     { return 8502 }
 
 func (c *CaddyManager) IsInstalled() bool {
-	_, err := os.Stat(filepath.Join(serviceBaseDir("caddy"), "caddy.exe"))
+	_, err := os.Stat(filepath.Join(serviceBaseDir("caddy"), platform.BinaryName("caddy")))
 	return err == nil
 }
 
 func (c *CaddyManager) ListVersions() ([]AvailableVersion, error) {
 	versions, err := c.fetchVersions()
 	if err != nil || len(versions) == 0 {
-		return caddyKnownVersions, nil
+		return caddyKnownVersionsList(), nil
 	}
 	if len(versions) > caddyMaxVersions {
 		versions = versions[:caddyMaxVersions]
@@ -50,7 +65,16 @@ func (c *CaddyManager) Install(version string, port int, progress chan<- Progres
 		return err
 	}
 
-	filename := fmt.Sprintf("caddy_%s_windows_amd64.zip", version)
+	var filename string
+	if goruntime.GOOS == "darwin" {
+		arch := "arm64"
+		if goruntime.GOARCH == "amd64" {
+			arch = "amd64"
+		}
+		filename = fmt.Sprintf("caddy_%s_darwin_%s.tar.gz", version, arch)
+	} else {
+		filename = fmt.Sprintf("caddy_%s_windows_amd64.zip", version)
+	}
 	tmpFile, err := downloadToTmp(downloadURL, filename, progress)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
@@ -65,18 +89,18 @@ func (c *CaddyManager) Install(version string, port int, progress chan<- Progres
 	os.RemoveAll(tmpExtract)
 	defer os.RemoveAll(tmpExtract)
 
-	if err := extractZip(tmpFile, tmpExtract); err != nil {
+	if err := extractArchive(tmpFile, tmpExtract); err != nil {
 		return fmt.Errorf("extraction failed: %w", err)
 	}
 
-	// Caddy zip contains caddy.exe directly (no subdirectory)
-	if _, err := os.Stat(filepath.Join(tmpExtract, "caddy.exe")); os.IsNotExist(err) {
+	// Caddy archive contains caddy binary directly (no subdirectory)
+	if _, err := os.Stat(filepath.Join(tmpExtract, platform.BinaryName("caddy"))); os.IsNotExist(err) {
 		// Check subdirectories
 		entries, _ := os.ReadDir(tmpExtract)
 		found := false
 		for _, e := range entries {
 			if e.IsDir() {
-				if _, err := os.Stat(filepath.Join(tmpExtract, e.Name(), "caddy.exe")); err == nil {
+				if _, err := os.Stat(filepath.Join(tmpExtract, e.Name(), platform.BinaryName("caddy"))); err == nil {
 					tmpExtract = filepath.Join(tmpExtract, e.Name())
 					found = true
 					break
@@ -84,7 +108,7 @@ func (c *CaddyManager) Install(version string, port int, progress chan<- Progres
 			}
 		}
 		if !found {
-			return fmt.Errorf("caddy.exe not found in extracted files")
+			return fmt.Errorf("caddy binary not found in extracted files")
 		}
 	}
 
@@ -136,7 +160,7 @@ func (c *CaddyManager) Start() error {
 	}
 
 	base := serviceBaseDir("caddy")
-	exe := filepath.Join(base, "caddy.exe")
+	exe := filepath.Join(base, platform.BinaryName("caddy"))
 	logFile := filepath.Join(base, "logs", "caddy.log")
 
 	_, err := StartProcess("caddy", exe, []string{
@@ -213,6 +237,13 @@ func (c *CaddyManager) Info() ServiceInfo {
 	}
 }
 
+// ResetConfig rewrites the base Caddyfile (default site only). Project vhosts
+// are appended afterwards by project.GenerateCaddyVhost, so callers that
+// regenerate all vhosts must reset first or the file grows on every pass.
+func (c *CaddyManager) ResetConfig() {
+	c.writeConfig(c.Port())
+}
+
 func (c *CaddyManager) writeConfig(port int) {
 	base := serviceBaseDir("caddy")
 	confPath := filepath.Join(base, "Caddyfile")
@@ -241,7 +272,7 @@ func (c *CaddyManager) writeDefaultPage() {
 }
 
 func (c *CaddyManager) findDownloadURL(version string) (string, error) {
-	for _, v := range caddyKnownVersions {
+	for _, v := range caddyKnownVersionsList() {
 		if v.Version == version {
 			return v.URL, nil
 		}
@@ -255,6 +286,13 @@ func (c *CaddyManager) findDownloadURL(version string) (string, error) {
 		}
 	}
 	// Construct URL as fallback
+	if goruntime.GOOS == "darwin" {
+		arch := "arm64"
+		if goruntime.GOARCH == "amd64" {
+			arch = "amd64"
+		}
+		return fmt.Sprintf("https://github.com/caddyserver/caddy/releases/download/v%s/caddy_%s_darwin_%s.tar.gz", version, version, arch), nil
+	}
 	return fmt.Sprintf("https://github.com/caddyserver/caddy/releases/download/v%s/caddy_%s_windows_amd64.zip", version, version), nil
 }
 
@@ -264,11 +302,23 @@ func (c *CaddyManager) fetchVersions() ([]AvailableVersion, error) {
 		return nil, err
 	}
 
+	var assetSuffix string
+	if goruntime.GOOS == "darwin" {
+		arch := "arm64"
+		if goruntime.GOARCH == "amd64" {
+			arch = "amd64"
+		}
+		assetSuffix = fmt.Sprintf("darwin_%s.tar.gz", arch)
+	} else {
+		assetSuffix = "windows_amd64.zip"
+	}
+
 	var versions []AvailableVersion
 	for _, rel := range releases {
 		tag := strings.TrimPrefix(rel.TagName, "v")
+		wantName := fmt.Sprintf("caddy_%s_%s", tag, assetSuffix)
 		for _, asset := range rel.Assets {
-			if asset.Name == fmt.Sprintf("caddy_%s_windows_amd64.zip", tag) {
+			if asset.Name == wantName {
 				label := tag
 				if len(versions) == 0 {
 					label = tag + " (Latest)"

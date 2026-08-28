@@ -4,11 +4,14 @@
   import StatusBadge from '../lib/components/StatusBadge.svelte';
   import ProgressBar from '../lib/components/ProgressBar.svelte';
   import ServiceInfoPanel from '../lib/components/ServiceInfoPanel.svelte';
+  import ConfirmDialog from '../lib/components/ConfirmDialog.svelte';
   import { serviceLogos } from '../lib/logos';
   import {
     GetAllServices,
     GetServiceVersions,
+    RefreshServiceVersions,
     InstallService,
+    UpdateService,
     UninstallService,
     StartService,
     StopService,
@@ -19,7 +22,8 @@
     GetAutoStartServices,
     SetServiceAutoStart,
   } from '../../wailsjs/go/main/App';
-  import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime';
+  import { EventsOn } from '../../wailsjs/runtime/runtime';
+  import { serviceInstalls, startServiceInstall, clearServiceInstall } from '../lib/stores/installs';
 
   type ServiceState = 'running' | 'stopped' | 'not_installed' | 'error';
 
@@ -30,6 +34,8 @@
     port: number;
     version: string;
     installed: boolean;
+    updateVersion?: string;
+    latestMajor?: string;
   }
 
   interface AvailableVersion {
@@ -64,13 +70,17 @@
       services: [
         {
           id: 'webserver', name: 'Web Server', descKey: 'services.webServerDesc',
-          defaultPort: 80, managed: true,
+          defaultPort: 8500, managed: true,
           variants: [
             { id: 'nginx', name: 'Nginx' },
             { id: 'apache', name: 'Apache' },
             { id: 'caddy', name: 'Caddy' },
           ]
         },
+        // FrankenPHP is independent — it bundles its own webserver + PHP runtime,
+        // and projects choose it explicitly. Lives in the same Web category but
+        // is not part of the nginx/apache/caddy mutually-exclusive group.
+        { id: 'frankenphp', name: 'FrankenPHP', descKey: 'services.frankenphpDesc', defaultPort: 8501, managed: true },
       ],
     },
     {
@@ -111,10 +121,16 @@
 
   let serviceStatuses: Record<string, ServiceInfo> = {};
   let autoStartSvcs: string[] = [];
-  let installing: string = '';
-  let progressPercent: number = 0;
-  let progressMessage: string = '';
   let errorMessage: string = '';
+
+  // Install state is sourced from the global store so progress survives page
+  // unmount. `installing` stays as a derived string for compatibility with the
+  // many UI checks below (isInstalling per row, button disabled flags, etc.).
+  $: serviceInstallEntries = Object.entries($serviceInstalls);
+  $: installing = serviceInstallEntries[0]?.[0] ?? '';
+  $: currentServiceInstall = serviceInstallEntries[0]?.[1];
+  $: progressPercent = currentServiceInstall?.percent ?? 0;
+  $: progressMessage = currentServiceInstall?.message ?? '';
   let showLogs: string = '';
   let logLines: string[] = [];
   let showInfo: string = '';
@@ -173,12 +189,12 @@
   }
 
   // Load versions for selected variant
-  async function loadVariantVersions(variantId: string) {
+  async function loadVariantVersions(variantId: string, force: boolean = false) {
     loadingVersions = true;
     installVersions = [];
     selectedVersion = '';
     try {
-      installVersions = await GetServiceVersions(variantId) || [];
+      installVersions = (force ? await RefreshServiceVersions(variantId) : await GetServiceVersions(variantId)) || [];
       if (installVersions.length > 0) {
         selectedVersion = installVersions[0].version;
       }
@@ -228,16 +244,41 @@
     const name = selectedVariant;
     showInstallDialog = false;
     dialogSvc = null;
-    installing = name;
-    progressPercent = 0;
-    progressMessage = $t('services.starting');
     errorMessage = '';
+    startServiceInstall(name, $t('services.starting'));
 
     try {
+      // InstallService returns immediately (background goroutine on the backend).
+      // Progress / completion / errors flow through service:* events into the store.
       await InstallService(name, selectedVersion, selectedPort);
     } catch (e: any) {
       errorMessage = `${name}: ${errorStr(e)}`;
-      installing = '';
+      clearServiceInstall(name);
+    }
+  }
+
+  function dismissInstallError() {
+    if (installing) clearServiceInstall(installing);
+  }
+
+  // In-place update: `pendingUpdate` holds the service awaiting confirmation.
+  let pendingUpdate: { id: string; to: string } | null = null;
+
+  function requestUpdate(id: string, to: string) {
+    pendingUpdate = { id, to };
+  }
+
+  async function confirmUpdate() {
+    if (!pendingUpdate) return;
+    const { id, to } = pendingUpdate;
+    pendingUpdate = null;
+    errorMessage = '';
+    startServiceInstall(id, $t('services.updating'));
+    try {
+      await UpdateService(id, to);
+    } catch (e: any) {
+      errorMessage = `${id}: ${errorStr(e)}`;
+      clearServiceInstall(id);
     }
   }
 
@@ -245,7 +286,23 @@
     return typeof e === 'string' ? e : e?.message || JSON.stringify(e);
   }
 
-  async function uninstall(id: string) {
+  // Uninstall confirmation: `pendingUninstall` is the service id awaiting
+  // confirmation. The existing `busyService` + `busyAction` flags continue to
+  // drive the per-row spinner during the actual deletion.
+  let pendingUninstall: string | null = null;
+
+  function requestUninstall(id: string) {
+    pendingUninstall = id;
+  }
+
+  function cancelUninstall() {
+    if (busyAction === 'uninstalling') return; // can't cancel mid-uninstall
+    pendingUninstall = null;
+  }
+
+  async function confirmUninstall() {
+    if (!pendingUninstall) return;
+    const id = pendingUninstall;
     errorMessage = '';
     busyService = id;
     busyAction = 'uninstalling';
@@ -257,6 +314,7 @@
     } finally {
       busyService = '';
       busyAction = '';
+      pendingUninstall = null;
     }
   }
 
@@ -337,30 +395,29 @@
     editingPort = '';
   }
 
-  function onProgress(data: any) {
-    if (data.name === installing) {
-      progressPercent = data.percent;
-      progressMessage = data.message;
-    }
-  }
+  // Calling EventsOff(name) would nuke the global listener in installs.ts too,
+  // so we keep per-listener unsub handles returned by EventsOn.
+  let eventUnsubs: Array<() => void> = [];
 
   onMount(() => {
-    EventsOn('service:progress', onProgress);
-    EventsOn('service:error', (data: any) => {
-      errorMessage = `${data.name || 'service'}: ${data.error}`;
-      installing = '';
-    });
-    EventsOn('service:installed', () => {
-      installing = '';
+    // service:progress / service:installed / service:error are handled globally
+    // in lib/stores/installs.ts so state survives unmount. We only listen for
+    // service:installed here to refresh the service list while the page is open.
+    eventUnsubs.push(EventsOn('service:installed', () => {
       loadServices();
-    });
+    }));
+    eventUnsubs.push(EventsOn('services:changed', () => {
+      loadServices();
+    }));
+    eventUnsubs.push(EventsOn('versions:refreshed', () => {
+      loadServices();
+    }));
     loadServices();
   });
 
   onDestroy(() => {
-    EventsOff('service:progress');
-    EventsOff('service:error');
-    EventsOff('service:installed');
+    eventUnsubs.forEach(fn => fn());
+    eventUnsubs = [];
   });
 </script>
 
@@ -379,14 +436,23 @@
     </div>
   {/if}
 
-  {#if installing}
-    <div class="card">
-      <div class="flex items-center gap-3 mb-2">
-        <div class="w-6 h-6">{@html serviceLogos[installing] || ''}</div>
-        <span class="text-sm font-medium">{$t('runtimes.downloading')} {installing}</span>
+  {#if currentServiceInstall}
+    {#if currentServiceInstall.error}
+      <div class="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+        <div class="flex items-start justify-between gap-2">
+          <pre class="whitespace-pre-wrap font-mono text-xs leading-relaxed flex-1"><span class="font-bold">{installing}:</span> {currentServiceInstall.error}</pre>
+          <button class="text-xs underline flex-shrink-0 mt-0.5" on:click={dismissInstallError}>{$t('common.dismiss')}</button>
+        </div>
       </div>
-      <ProgressBar percent={progressPercent} message={progressMessage} />
-    </div>
+    {:else}
+      <div class="card">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-6 h-6">{@html serviceLogos[installing] || ''}</div>
+          <span class="text-sm font-medium">{$t('runtimes.downloading')} {installing}</span>
+        </div>
+        <ProgressBar percent={currentServiceInstall.percent} message={currentServiceInstall.message} />
+      </div>
+    {/if}
   {/if}
 
   <!-- Install Dialog -->
@@ -416,7 +482,10 @@
 
         <!-- Version Selection -->
         <div class="mb-4">
-          <label for="svc-version" class="block text-sm font-medium mb-1.5">{$t('settings.version')}</label>
+          <div class="flex items-center justify-between mb-1.5">
+            <label for="svc-version" class="block text-sm font-medium">{$t('settings.version')}</label>
+            <button class="text-[11px] text-primary-500 hover:underline" on:click={() => loadVariantVersions(selectedVariant, true)} disabled={loadingVersions}>{$t('services.refreshVersions')}</button>
+          </div>
           {#if loadingVersions}
             <div class="text-sm text-[var(--color-text-secondary)]">{$t('common.loading')}</div>
           {:else if installVersions.length > 0}
@@ -576,11 +645,26 @@
                       <svg class="w-3 h-3 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                     </button>
 
-                    <!-- Row 2, Col 2: Version -->
+                    <!-- Row 2, Col 2: Version (+ update badge) -->
                     {#if version !== '-'}
-                      <div class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                        <span class="text-[10px] text-slate-500 font-bold uppercase">{$t('services.labelVer')}</span>
-                        <span class="text-xs font-mono font-bold text-slate-600 dark:text-slate-300">{version}</span>
+                      <div class="flex items-center gap-1.5">
+                        <div class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                          <span class="text-[10px] text-slate-500 font-bold uppercase">{$t('services.labelVer')}</span>
+                          <span class="text-xs font-mono font-bold text-slate-600 dark:text-slate-300">{version}</span>
+                        </div>
+                        {#if info?.updateVersion}
+                          <button
+                            class="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 text-[10px] font-bold font-mono disabled:opacity-50"
+                            on:click={() => requestUpdate(eid, info.updateVersion || '')}
+                            disabled={isBusy || installing !== '' || busyService !== ''}
+                            title={$t('services.updateTo', info.updateVersion)}
+                          >
+                            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            {info.updateVersion}
+                          </button>
+                        {:else if info?.latestMajor}
+                          <span class="px-1.5 py-1 rounded-lg text-[10px] font-mono text-slate-400 border border-dashed border-slate-300 dark:border-slate-700" title={$t('services.majorAvailable', info.latestMajor)}>{info.latestMajor}</span>
+                        {/if}
                       </div>
                     {:else}
                       <div></div>
@@ -647,7 +731,7 @@
                   </button>
                   <button
                     class="btn-icon text-red-500 hover:bg-red-500/10"
-                    on:click={() => uninstall(eid)}
+                    on:click={() => requestUninstall(eid)}
                     disabled={isBusy || installing !== '' || busyService !== ''}
                     title={$t('common.delete')}
                   >
@@ -734,3 +818,25 @@
     </div>
   {/each}
 </div>
+
+<ConfirmDialog
+  open={pendingUninstall !== null}
+  danger={true}
+  busy={busyAction === 'uninstalling'}
+  title={pendingUninstall ? $t('services.confirmUninstallTitle', serviceStatuses[pendingUninstall]?.displayName || pendingUninstall) : ''}
+  message={$t('services.confirmUninstallMsg')}
+  confirmLabel={busyAction === 'uninstalling' ? $t('services.uninstalling') : $t('common.delete')}
+  on:confirm={confirmUninstall}
+  on:cancel={cancelUninstall}
+/>
+
+<ConfirmDialog
+  open={pendingUpdate !== null}
+  danger={false}
+  busy={false}
+  title={pendingUpdate ? $t('services.confirmUpdateTitle', serviceStatuses[pendingUpdate.id]?.displayName || pendingUpdate.id, pendingUpdate.to) : ''}
+  message={$t('services.confirmUpdateMsg')}
+  confirmLabel={$t('services.update')}
+  on:confirm={confirmUpdate}
+  on:cancel={() => pendingUpdate = null}
+/>

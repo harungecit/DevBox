@@ -1,0 +1,174 @@
+# Release pipeline: push a tag like v0.2.0 → tests run → Windows installer +
+# portable zip are built (and code-signed when signing secrets exist) → a
+# GitHub Release is published with checksums and auto-generated notes. The
+# app's in-app updater reads that release.
+#
+# Optional secrets for Authenticode signing (removes the SmartScreen
+# "unknown publisher" warning once the certificate has reputation):
+#   WINDOWS_CERT_PFX_BASE64  base64 of the .pfx
+#   WINDOWS_CERT_PASSWORD    its password
+# Without them the build is published unsigned.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)build, e.g. v0.2.0'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.24'
+  NODE_VERSION: '20'
+  WAILS_VERSION: 'v2.11.0'
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: mkdir -p frontend/dist && touch frontend/dist/.keep
+      - run: go vet ./... && go test ./... -count=1
+      - run: cd frontend && npm ci && npm run check && npm run build
+
+  windows:
+    name: Windows amd64
+    needs: test
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - id: meta
+        name: Resolve version from tag
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails CLI and NSIS
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+          choco install nsis -y --no-progress
+
+      - name: Stamp version into wails.json (installer metadata)
+        shell: bash
+        run: |
+          V="${{ steps.meta.outputs.version }}"
+          jq --arg v "$V" '.info.productVersion = $v' wails.json > wails.tmp && mv wails.tmp wails.json
+
+      - name: Build exe + NSIS installer
+        shell: bash
+        run: |
+          V="${{ steps.meta.outputs.version }}"
+          wails build -clean -nsis -ldflags "-X DevBox/internal/updater.Version=$V"
+          ls -la build/bin
+
+      - name: Code-sign (only when a certificate is configured)
+        if: ${{ env.CERT != '' }}
+        env:
+          CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:CERT))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          & $signtool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f "$env:RUNNER_TEMP\cert.pfx" /p $env:CERT_PASSWORD build\bin\DevBox.exe
+          # Rebuild the installer around the signed exe, then sign the installer itself.
+          makensis -DARG_WAILS_AMD64_BINARY="$PWD\build\bin\DevBox.exe" build\windows\installer\project.nsi
+          & $signtool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f "$env:RUNNER_TEMP\cert.pfx" /p $env:CERT_PASSWORD build\bin\DevBox-amd64-installer.exe
+          Remove-Item "$env:RUNNER_TEMP\cert.pfx"
+
+      - name: Package artifacts
+        shell: bash
+        run: |
+          V="${{ steps.meta.outputs.version }}"
+          mkdir -p dist
+          cp build/bin/DevBox-amd64-installer.exe "dist/DevBox-Setup-$V-windows-amd64.exe"
+          (cd build/bin && 7z a -tzip "../../dist/DevBox-$V-windows-amd64-portable.zip" DevBox.exe)
+          (cd dist && sha256sum * > "SHA256SUMS-windows.txt" && cat SHA256SUMS-windows.txt)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-dist
+          path: dist/*
+
+  # macOS builds are intentionally disabled until the macOS runtime/service
+  # sources are validated (see README "Platform support"). Flip `if` to true
+  # and add a signing/notarization step to enable.
+  macos:
+    name: macOS (coming soon)
+    if: ${{ false }}
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+      - run: wails build -clean -platform darwin/universal
+
+  publish:
+    name: Publish GitHub Release
+    needs: [windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-dist
+          path: dist
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: DevBox v${{ needs.windows.outputs.version }}
+          generate_release_notes: true
+          prerelease: ${{ contains(needs.windows.outputs.version, '-') }}
+          files: dist/*
+          body: |
+            ### Downloads
+            - **Windows Setup (64-bit)** — `DevBox-Setup-${{ needs.windows.outputs.version }}-windows-amd64.exe` ← recommended
+            - Windows portable (no installer) — `DevBox-${{ needs.windows.outputs.version }}-windows-amd64-portable.zip`
+            - macOS — coming soon
+
+            Verify downloads with `SHA256SUMS-windows.txt`.
+            If Windows SmartScreen shows "Windows protected your PC", click **More info → Run anyway** (see the website for why).

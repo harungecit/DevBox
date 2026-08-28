@@ -8,13 +8,25 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strings"
 )
 
 const rustReleasesURL = "https://api.github.com/repos/rust-lang/rust/releases?per_page=30"
 const rustDistURL = "https://static.rust-lang.org/dist/"
-const rustTarget = "x86_64-pc-windows-msvc"
+// rustTarget returns the Rust target triple for the current platform
+func rustTarget() string {
+	switch goruntime.GOOS {
+	case "darwin":
+		if goruntime.GOARCH == "arm64" {
+			return "aarch64-apple-darwin"
+		}
+		return "x86_64-apple-darwin"
+	default:
+		return "x86_64-pc-windows-msvc"
+	}
+}
 
 // rustGitHubRelease represents a release from GitHub API
 type rustGitHubRelease struct {
@@ -118,7 +130,7 @@ func (r *RustManager) Install(version string, progress chan<- Progress) error {
 	}
 
 	// Download rust-{version}-x86_64-pc-windows-msvc.tar.gz
-	filename := fmt.Sprintf("rust-%s-%s.tar.gz", version, rustTarget)
+	filename := fmt.Sprintf("rust-%s-%s.tar.gz", version, rustTarget())
 	downloadURL := rustDistURL + filename
 
 	// Get SHA256 checksum
@@ -152,7 +164,7 @@ func (r *RustManager) Install(version string, progress chan<- Progress) error {
 	}
 
 	// The archive extracts to rust-{version}-{target}/
-	extractedDir := filepath.Join(tmpExtract, fmt.Sprintf("rust-%s-%s", version, rustTarget))
+	extractedDir := filepath.Join(tmpExtract, fmt.Sprintf("rust-%s-%s", version, rustTarget()))
 	if _, err := os.Stat(extractedDir); os.IsNotExist(err) {
 		// Fallback: find the single directory inside tmpExtract
 		entries, _ := os.ReadDir(tmpExtract)

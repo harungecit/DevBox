@@ -6,11 +6,17 @@ type Translations = Record<string, string>;
 export const locale = writable<string>('en');
 export const translations = writable<Translations>({});
 
-// Derived store: translation function
+// Derived store: translation function. Supports {0}, {1}, … positional
+// placeholders that get replaced by trailing args. `$t('key', a, b)` substitutes
+// `{0}` → a, `{1}` → b. No-arg calls keep working unchanged.
 export const t = derived(
   translations,
-  ($translations) => (key: string): string => {
-    return $translations[key] || key;
+  ($translations) => (key: string, ...args: (string | number)[]): string => {
+    let msg = $translations[key] || key;
+    for (let i = 0; i < args.length; i++) {
+      msg = msg.split(`{${i}}`).join(String(args[i]));
+    }
+    return msg;
   }
 );
 

@@ -2,11 +2,18 @@
   import { onMount } from 'svelte';
   import Sidebar from './lib/components/Sidebar.svelte';
   import { currentPage, theme, applyTheme, loadConfig } from './lib/stores/app';
+  import { initInstallListeners } from './lib/stores/installs';
   import { initI18n } from './lib/i18n/index';
+
+  // Attach the global install listeners (runtimes + services) once, at app
+  // startup, so install progress survives navigating away from and back to the
+  // page that started it.
+  initInstallListeners();
 
   import Dashboard from './pages/Dashboard.svelte';
   import Runtimes from './pages/Runtimes.svelte';
   import Services from './pages/Services.svelte';
+  import Tools from './pages/Tools.svelte';
   import Projects from './pages/Projects.svelte';
   import Path from './pages/Path.svelte';
   import Settings from './pages/Settings.svelte';
@@ -15,6 +22,7 @@
     dashboard: Dashboard,
     runtimes: Runtimes,
     services: Services,
+    tools: Tools,
     projects: Projects,
     path: Path,
     settings: Settings,

@@ -8,7 +8,11 @@
     GetAllServices,
     GetGlobalRuntime,
     StartService,
-    StopService
+    StopService,
+    GetProxyStatus,
+    InstallProxy,
+    StartProxy,
+    StopProxy,
   } from '../../wailsjs/go/main/App';
   import { onMount } from 'svelte';
 
@@ -26,6 +30,60 @@
   let activeVersions: Record<string, string> = {};
   let loading = true;
   let togglingService: string = '';
+
+  interface ProxyStatus {
+    installed: boolean;
+    running: boolean;
+    enabled: boolean;
+    port: number;
+  }
+  let proxyStatus: ProxyStatus = { installed: false, running: false, enabled: false, port: 80 };
+  let proxyBusy: boolean = false;
+  let proxyError: string = '';
+
+  async function loadProxyStatus() {
+    try {
+      proxyStatus = await GetProxyStatus();
+    } catch (e) {
+      console.error('proxy status load error:', e);
+    }
+  }
+
+  async function installProxyHandler() {
+    proxyBusy = true;
+    proxyError = '';
+    try {
+      await InstallProxy();
+      await loadProxyStatus();
+    } catch (e: any) {
+      proxyError = String(e?.message || e);
+    }
+    proxyBusy = false;
+  }
+
+  async function startProxyHandler() {
+    proxyBusy = true;
+    proxyError = '';
+    try {
+      await StartProxy();
+      await loadProxyStatus();
+    } catch (e: any) {
+      proxyError = String(e?.message || e);
+    }
+    proxyBusy = false;
+  }
+
+  async function stopProxyHandler() {
+    proxyBusy = true;
+    proxyError = '';
+    try {
+      await StopProxy();
+      await loadProxyStatus();
+    } catch (e: any) {
+      proxyError = String(e?.message || e);
+    }
+    proxyBusy = false;
+  }
 
   const runtimeLabels: Record<string, string> = {
     go: 'Go', node: 'Node.js', php: 'PHP', python: 'Python', rust: 'Rust'
@@ -46,7 +104,10 @@
     }
   }
 
-  onMount(loadData);
+  onMount(async () => {
+    await loadData();
+    await loadProxyStatus();
+  });
 
   $: installedServices = Object.values(services).filter(s => s.installed);
   $: runningServices = installedServices.filter(s => s.status === 'running');
@@ -80,6 +141,65 @@
       <svg class="w-3.5 h-3.5 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
       {$t('common.refresh')}
     </button>
+  </div>
+
+  <!-- Front-door proxy status -->
+  <div class="card p-5">
+    <div class="flex items-start justify-between gap-4">
+      <div class="flex items-start gap-3 min-w-0">
+        <div class="w-10 h-10 rounded-lg {proxyStatus.running ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'} flex items-center justify-center font-bold text-sm flex-shrink-0">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        </div>
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <h3 class="font-bold text-base">{$t('dashboard.proxyTitle')}</h3>
+            {#if proxyStatus.running}
+              <span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold uppercase">{$t('dashboard.proxyRunningOnPort', proxyStatus.port)}</span>
+            {:else if proxyStatus.installed}
+              <span class="text-[10px] px-1.5 py-0.5 bg-slate-500/10 text-slate-500 rounded border border-slate-500/20 font-bold uppercase">{$t('dashboard.proxyStopped')}</span>
+            {:else}
+              <span class="text-[10px] px-1.5 py-0.5 bg-amber-500/10 text-amber-500 rounded border border-amber-500/20 font-bold uppercase">{$t('dashboard.proxyNotInstalled')}</span>
+            {/if}
+          </div>
+          <p class="text-xs text-[var(--color-text-secondary)] mt-1">{$t('dashboard.proxyDesc')}</p>
+          {#if !proxyStatus.installed}
+            <p class="text-[11px] text-[var(--color-text-secondary)] italic mt-1">{$t('dashboard.proxyAdminHint')}</p>
+          {/if}
+          {#if proxyError}
+            <p class="text-[11px] text-red-500 mt-1 font-mono">{proxyError}</p>
+          {/if}
+        </div>
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        {#if !proxyStatus.installed}
+          <button
+            class="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
+            on:click={installProxyHandler}
+            disabled={proxyBusy}
+          >
+            {#if proxyBusy}<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>{/if}
+            {$t('dashboard.proxyInstall')}
+          </button>
+        {:else if proxyStatus.running}
+          <button
+            class="text-xs px-3 py-1.5 rounded-lg border border-[var(--color-border)] hover:bg-[var(--color-bg)] disabled:opacity-50"
+            on:click={stopProxyHandler}
+            disabled={proxyBusy}
+          >
+            {$t('dashboard.proxyStop')}
+          </button>
+        {:else}
+          <button
+            class="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1.5"
+            on:click={startProxyHandler}
+            disabled={proxyBusy}
+          >
+            {#if proxyBusy}<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>{/if}
+            {$t('dashboard.proxyStart')}
+          </button>
+        {/if}
+      </div>
+    </div>
   </div>
 
   <!-- Main Content Grid -->

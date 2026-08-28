@@ -6,8 +6,9 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	"DevBox/internal/platform"
 )
 
 // StartProcess starts a service process, verifies it stays alive, and saves its PID.
@@ -16,14 +17,8 @@ func StartProcess(name string, executable string, args []string, workDir string,
 	cmd := exec.Command(executable, args...)
 	cmd.Dir = workDir
 
-	// Use CREATE_NEW_PROCESS_GROUP + HideWindow (NOT CREATE_NO_WINDOW!)
-	// CREATE_NO_WINDOW removes the console entirely, which breaks services
-	// like nginx that use Windows console events for signal handling.
-	// HideWindow creates a hidden console - the process works but no visible window.
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
-		HideWindow:    true,
-	}
+	// Create new process group + hide window (platform-aware)
+	platform.SetProcessAttrs(cmd, true, true)
 
 	// Redirect output to log file
 	var logFileHandle *os.File
@@ -60,7 +55,7 @@ func StartProcess(name string, executable string, args []string, workDir string,
 	// Services like nginx crash immediately if port is in use or config is invalid
 	time.Sleep(1500 * time.Millisecond)
 
-	if !isProcessRunning(pid) {
+	if !platform.IsProcessRunning(pid) {
 		os.Remove(pidFile)
 
 		// Read error details from log file
@@ -99,7 +94,7 @@ func StopProcess(name string) error {
 	os.Remove(pidFile)
 
 	if err != nil {
-		if !isProcessRunning(pid) {
+		if !platform.IsProcessRunning(pid) {
 			return nil
 		}
 		return fmt.Errorf("failed to stop %s (PID %d): %w", name, pid, err)
@@ -122,31 +117,12 @@ func IsRunning(name string) bool {
 		return false
 	}
 
-	if !isProcessRunning(pid) {
+	if !platform.IsProcessRunning(pid) {
 		os.Remove(pidFile)
 		return false
 	}
 
 	return true
-}
-
-// isProcessRunning checks if a process with given PID exists on Windows
-func isProcessRunning(pid int) bool {
-	const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-	const STILL_ACTIVE = 259
-
-	handle, err := syscall.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
-	if err != nil {
-		return false
-	}
-	defer syscall.CloseHandle(handle)
-
-	var exitCode uint32
-	err = syscall.GetExitCodeProcess(handle, &exitCode)
-	if err != nil {
-		return false
-	}
-	return exitCode == STILL_ACTIVE
 }
 
 // GetPID reads the PID from file

@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -13,11 +15,14 @@ import (
 	"DevBox/internal/config"
 	"DevBox/internal/i18n"
 	"DevBox/internal/pathenv"
+	"DevBox/internal/platform"
 	"DevBox/internal/project"
+	"DevBox/internal/proxy"
 	"DevBox/internal/runtime"
 	"DevBox/internal/service"
 	"DevBox/internal/tools"
 	"DevBox/internal/tunnel"
+	"DevBox/internal/updater"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -38,6 +43,15 @@ func debugLog(msg string, args ...interface{}) {
 type App struct {
 	ctx context.Context
 	mu  sync.Mutex
+
+	// quitting distinguishes a real Quit (tray menu / Ctrl+Q) from the window
+	// close button, which only hides to the tray when CloseToTray is on.
+	quitting bool
+	trayEnd  func()
+
+	// vhostMu serialises vhost regeneration (startup, project edits, runtime
+	// switches can all trigger it concurrently).
+	vhostMu sync.Mutex
 }
 
 // NewApp creates a new App application struct
@@ -50,8 +64,64 @@ func (a *App) shutdown(ctx context.Context) {
 	debugLog("App shutting down, stopping all tunnels, dev servers, and services...")
 	tunnel.StopAllTunnels()
 	project.StopAllDevServers()
+	runtime.StopPHPCGI()
 	service.StopAll()
-	debugLog("All tunnels, dev servers, and services stopped")
+	tools.StopAdminerServer()
+	proxy.Stop()
+	if a.trayEnd != nil {
+		a.trayEnd()
+	}
+	debugLog("All tunnels, dev servers, services, and proxy stopped")
+}
+
+// beforeClose runs when the window's close button is pressed. With CloseToTray
+// the window is hidden and everything keeps running until Quit is chosen.
+func (a *App) beforeClose(ctx context.Context) bool {
+	if a.quitting {
+		return false
+	}
+	if config.Get().CloseToTray {
+		wailsRuntime.WindowHide(ctx)
+		return true
+	}
+	return false
+}
+
+func (a *App) showWindow() {
+	if a.ctx == nil {
+		return
+	}
+	// May be called from the tray thread; never block it on the UI loop.
+	go func() {
+		wailsRuntime.WindowShow(a.ctx)
+		wailsRuntime.WindowUnminimise(a.ctx)
+	}()
+}
+
+func (a *App) quit() {
+	a.quitting = true
+	if a.ctx != nil {
+		// Called from the tray thread — hand the quit to Wails' loop.
+		go wailsRuntime.Quit(a.ctx)
+	}
+}
+
+// Quit exits DevBox completely (stops services). Bound for the UI.
+func (a *App) Quit() {
+	a.quit()
+}
+
+// HideToTray hides the window (same as the close button with CloseToTray on).
+func (a *App) HideToTray() {
+	if a.ctx != nil {
+		wailsRuntime.WindowHide(a.ctx)
+	}
+}
+
+func (a *App) emitServicesChanged() {
+	if a.ctx != nil {
+		wailsRuntime.EventsEmit(a.ctx, "services:changed", nil)
+	}
 }
 
 // startup is called when the app starts
@@ -76,46 +146,56 @@ func (a *App) startup(ctx context.Context) {
 	runtime.InitAll()
 	service.InitAll()
 
-	// Regenerate all project vhosts on startup (ensures PHP block etc. are current)
-	a.regenerateAllVhosts()
+	// Keep the OS login entry in sync with the executable's current location
+	// (installer upgrades move it; a stale entry silently breaks autostart).
+	if cfg.AutoStart {
+		if err := platform.SetAutoStart(true); err != nil {
+			debugLog("autostart re-register failed: %v", err)
+		}
+	}
 
-	// Auto-start PHP-CGI if any PHP project has a domain configured
-	a.autoStartPHPCGI()
+	// Regenerate all project vhosts on startup — also reconciles the php-cgi
+	// instances every PHP project needs (one per PHP version in use).
+	a.regenerateAllVhosts()
 
 	// Auto-start configured services
 	go a.autoStartServices()
-}
 
-func (a *App) autoStartPHPCGI() {
-	if runtime.IsPHPCGIRunning() {
-		return
+	// Auto-start the front-door proxy if it's installed and the user enabled it.
+	// Failures are logged but non-fatal — DevBox keeps running without proxy.
+	if cfg.ProxyEnabled && proxy.IsInstalled() {
+		go func() {
+			if err := proxy.Start(); err != nil {
+				debugLog("proxy auto-start failed: %v", err)
+			}
+		}()
 	}
-	projects, err := project.ListProjects()
-	if err != nil {
-		return
-	}
-	needsPHP := false
-	for _, p := range projects {
-		if p.Domain != "" && isPhpFramework(p.Framework) {
-			needsPHP = true
-			break
+
+	// Bring back custom-domain tunnels that were active last session.
+	go func() {
+		if err := tunnel.ResumeNamedTunnels(); err != nil {
+			debugLog("named tunnel resume failed: %v", err)
 		}
+	}()
+
+	// Tray icon (Windows / macOS with cgo). Runs on the app's own event loop.
+	start, end := a.setupTray()
+	a.trayEnd = end
+	if start != nil {
+		start()
 	}
-	if !needsPHP {
-		return
-	}
-	phpMgr, ok := runtime.Registry["php"]
-	if !ok {
-		return
-	}
-	ver, _ := phpMgr.GetGlobal()
-	if ver == "" {
-		return
-	}
-	debugLog("Auto-starting PHP-CGI (version %s) for PHP projects", ver)
-	if err := runtime.StartPHPCGI(ver, 9000); err != nil {
-		debugLog("Auto-start PHP-CGI failed: %v", err)
-	}
+
+	// Keep remote version lists warm so the Runtimes/Services pages open with
+	// fresh data and update badges without the user pressing Refresh.
+	go a.versionRefreshLoop()
+
+	// Check for a newer DevBox release once shortly after launch.
+	go func() {
+		time.Sleep(8 * time.Second)
+		if r := updater.Check(); r.Available && a.ctx != nil {
+			wailsRuntime.EventsEmit(a.ctx, "appupdate:available", r)
+		}
+	}()
 }
 
 func (a *App) autoStartServices() {
@@ -133,6 +213,49 @@ func (a *App) autoStartServices() {
 			debugLog("Auto-start failed for %s: %v", name, err)
 		}
 	}
+	a.emitServicesChanged()
+}
+
+// versionRefreshLoop refreshes stale version caches shortly after launch and
+// then periodically. Emits "versions:refreshed" so open pages reload.
+func (a *App) versionRefreshLoop() {
+	time.Sleep(4 * time.Second)
+	a.refreshVersionCaches(false)
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		a.refreshVersionCaches(false)
+	}
+}
+
+func (a *App) refreshVersionCaches(force bool) {
+	changed := false
+	for name := range runtime.Registry {
+		if force || runtime.IsCacheStale(name) {
+			if _, fromCache, err := runtime.ListRemoteCached(name, true); err == nil && !fromCache {
+				changed = true
+			} else if err != nil {
+				debugLog("version refresh %s: %v", name, err)
+			}
+		}
+	}
+	for name := range service.Registry {
+		if force || service.IsServiceCacheStale(name) {
+			if _, fromCache, err := service.ListVersionsCached(name, true); err == nil && !fromCache {
+				changed = true
+			} else if err != nil {
+				debugLog("service version refresh %s: %v", name, err)
+			}
+		}
+	}
+	if changed && a.ctx != nil {
+		wailsRuntime.EventsEmit(a.ctx, "versions:refreshed", nil)
+	}
+}
+
+// RefreshAllVersions forces a re-fetch of every runtime/service version list.
+func (a *App) RefreshAllVersions() {
+	go a.refreshVersionCaches(true)
 }
 
 // --- Config bindings ---
@@ -143,11 +266,51 @@ func (a *App) GetConfig() *config.Config {
 
 func (a *App) SetLanguage(lang string) error {
 	i18n.SetLanguage(lang)
-	return config.SetLanguage(lang)
+	if err := config.SetLanguage(lang); err != nil {
+		return err
+	}
+	a.rebuildTrayMenu()
+	return nil
 }
 
 func (a *App) SetTheme(theme string) error {
 	return config.SetTheme(theme)
+}
+
+// SetCloseToTray toggles whether the close button hides to the tray.
+func (a *App) SetCloseToTray(enabled bool) error {
+	cfg := config.Get()
+	cfg.CloseToTray = enabled
+	return config.Save()
+}
+
+// SetStartMinimized toggles launching hidden in the tray.
+func (a *App) SetStartMinimized(enabled bool) error {
+	cfg := config.Get()
+	cfg.StartMinimized = enabled
+	return config.Save()
+}
+
+// GetDataDir returns the data directory path (for display / open folder).
+func (a *App) GetDataDir() string {
+	return config.GetDataDir()
+}
+
+// OpenDataDir opens the data directory in the file manager.
+func (a *App) OpenDataDir() error {
+	return platform.OpenFolder(config.GetDataDir())
+}
+
+// MigrationNotice describes a data-dir move performed at this launch.
+type MigrationNotice struct {
+	Migrated bool   `json:"migrated"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+}
+
+// GetMigrationNotice lets the UI show a one-time "your data moved" banner.
+func (a *App) GetMigrationNotice() MigrationNotice {
+	return MigrationNotice{Migrated: config.Migrated, From: config.MigratedFrom, To: config.GetDataDir()}
 }
 
 // --- i18n bindings ---
@@ -168,38 +331,61 @@ type RuntimeVersionInfo struct {
 	Stable    bool   `json:"stable"`
 	Current   bool   `json:"current"`
 	Installed bool   `json:"installed"`
+	// UpdateFor is the installed version this remote version would replace
+	// in place (same release line, newer). Empty for plain installs.
+	UpdateFor string `json:"updateFor"`
 }
 
-// GetRemoteVersions fetches available versions for a runtime
-func (a *App) GetRemoteVersions(name string) ([]RuntimeVersionInfo, error) {
-	mgr, ok := runtime.Registry[name]
-	if !ok {
-		return nil, nil
-	}
+// RemoteVersionsResult bundles the list with cache metadata for the UI.
+type RemoteVersionsResult struct {
+	Versions  []RuntimeVersionInfo `json:"versions"`
+	FromCache bool                 `json:"fromCache"`
+	FetchedAt string               `json:"fetchedAt"`
+}
 
-	remote, err := mgr.ListRemote()
-	if err != nil {
-		return nil, err
-	}
-
-	// Get installed versions to mark them
+func (a *App) buildRemoteResult(name string, remote []runtime.Version, fromCache bool) RemoteVersionsResult {
+	mgr := runtime.Registry[name]
 	installed, _ := mgr.ListInstalled()
 	installedMap := map[string]bool{}
 	for _, v := range installed {
 		installedMap[v.Number] = true
 	}
-
-	var result []RuntimeVersionInfo
+	result := RemoteVersionsResult{FromCache: fromCache}
+	if t := runtime.CacheFetchedAt(name); !t.IsZero() {
+		result.FetchedAt = t.Format(time.RFC3339)
+	}
 	for _, v := range remote {
-		result = append(result, RuntimeVersionInfo{
+		result.Versions = append(result.Versions, RuntimeVersionInfo{
 			Number:    v.Number,
 			Stable:    v.Stable,
 			Current:   v.Current,
 			Installed: installedMap[v.Number],
+			UpdateFor: runtime.UpdateTarget(name, v.Number, installed),
 		})
 	}
+	return result
+}
 
-	return result, nil
+// GetRemoteVersions fetches available versions for a runtime (cached).
+func (a *App) GetRemoteVersions(name string) ([]RuntimeVersionInfo, error) {
+	r, err := a.GetRemoteVersionsInfo(name, false)
+	if err != nil {
+		return nil, err
+	}
+	return r.Versions, nil
+}
+
+// GetRemoteVersionsInfo returns the version list plus cache metadata. force
+// bypasses the cache (the Refresh button).
+func (a *App) GetRemoteVersionsInfo(name string, force bool) (RemoteVersionsResult, error) {
+	if _, ok := runtime.Registry[name]; !ok {
+		return RemoteVersionsResult{}, nil
+	}
+	remote, fromCache, err := runtime.ListRemoteCached(name, force)
+	if err != nil {
+		return RemoteVersionsResult{}, err
+	}
+	return a.buildRemoteResult(name, remote, fromCache), nil
 }
 
 // GetInstalledVersions returns installed versions for a runtime
@@ -225,6 +411,29 @@ func (a *App) GetInstalledVersions(name string) ([]RuntimeVersionInfo, error) {
 	}
 
 	return result, nil
+}
+
+// GetRuntimeUpdates lists installed versions with a newer release in their
+// line (from the cached remote list — no network).
+func (a *App) GetRuntimeUpdates(name string) []runtime.RuntimeUpdate {
+	if _, ok := runtime.Registry[name]; !ok {
+		return nil
+	}
+	remote, _, err := runtime.ListRemoteCached(name, false)
+	if err != nil {
+		return nil
+	}
+	return runtime.FindUpdates(name, remote)
+}
+
+// GetInstalledCounts returns how many versions of each runtime are installed.
+func (a *App) GetInstalledCounts() map[string]int {
+	out := map[string]int{}
+	for name, mgr := range runtime.Registry {
+		versions, _ := mgr.ListInstalled()
+		out[name] = len(versions)
+	}
+	return out
 }
 
 // InstallRuntime installs a runtime version with progress events.
@@ -263,16 +472,102 @@ func (a *App) InstallRuntime(name, version string) error {
 			})
 		}()
 
-		for p := range progress {
-			wailsRuntime.EventsEmit(a.ctx, "runtime:progress", map[string]interface{}{
-				"name":    name,
-				"version": version,
-				"percent": p.Percent,
-				"message": p.Message,
-			})
-		}
+		a.forwardRuntimeProgress(name, version, progress)
 	}()
 
+	return nil
+}
+
+func (a *App) forwardRuntimeProgress(name, version string, progress <-chan runtime.Progress) {
+	for p := range progress {
+		wailsRuntime.EventsEmit(a.ctx, "runtime:progress", map[string]interface{}{
+			"name":    name,
+			"version": version,
+			"percent": p.Percent,
+			"message": p.Message,
+		})
+	}
+}
+
+// UpdateRuntime replaces an installed version with a newer one of the same
+// release line: installs the new version, carries over per-version state
+// (php.ini, Composer, yarn/pnpm, global npm/pip packages), moves the global
+// flag, PATH entry and project pins across, then removes the old version.
+func (a *App) UpdateRuntime(name, from, to string) error {
+	mgr, ok := runtime.Registry[name]
+	if !ok {
+		return fmt.Errorf("unknown runtime: %s", name)
+	}
+	if runtime.UpdateLine(name, from) != runtime.UpdateLine(name, to) {
+		return fmt.Errorf("%s → %s is not an in-place update; install it as a separate version", from, to)
+	}
+
+	go func() {
+		progress := make(chan runtime.Progress, 10)
+
+		go func() {
+			defer close(progress)
+			fail := func(err error) {
+				wailsRuntime.EventsEmit(a.ctx, "runtime:error", map[string]interface{}{
+					"name": name, "version": to, "error": err.Error(),
+				})
+			}
+
+			if err := mgr.Install(to, progress); err != nil {
+				fail(err)
+				return
+			}
+
+			progress <- runtime.Progress{Percent: 99, Message: "Migrating settings from " + from + "..."}
+			runtime.MigrateVersionData(name, from, to, progress)
+
+			global, _ := mgr.GetGlobal()
+			if global == from {
+				pathenv.RemoveFromPath(mgr.BinaryPath(from))
+				mgr.SetGlobal(to)
+				pathenv.AddToPath(mgr.BinaryPath(to))
+			}
+
+			// Re-point project pins.
+			if projects, err := project.ListProjects(); err == nil {
+				changed := false
+				for i := range projects {
+					if projects[i].Runtime == name && projects[i].RuntimeVersion == from {
+						projects[i].RuntimeVersion = to
+						changed = true
+					}
+				}
+				if changed {
+					project.SaveProjects(projects)
+				}
+			}
+
+			if name == "php" {
+				runtime.StopPHPCGIVersion(from)
+				cfg := config.Get()
+				if p, ok := cfg.PhpCgiPorts[from]; ok {
+					cfg.PhpCgiPorts[to] = p
+					delete(cfg.PhpCgiPorts, from)
+					config.Save()
+				}
+			}
+
+			progress <- runtime.Progress{Percent: 99, Message: "Removing " + from + "..."}
+			if err := mgr.Uninstall(from); err != nil {
+				progress <- runtime.Progress{Percent: 99, Message: "Old version could not be removed: " + err.Error()}
+			}
+
+			a.regenerateAllVhosts()
+
+			wailsRuntime.EventsEmit(a.ctx, "runtime:installed", map[string]interface{}{
+				"name":        name,
+				"version":     to,
+				"updatedFrom": from,
+			})
+		}()
+
+		a.forwardRuntimeProgress(name, to, progress)
+	}()
 	return nil
 }
 
@@ -292,10 +587,25 @@ func (a *App) UninstallRuntime(name, version string) error {
 		pathenv.RemoveFromPath(mgr.BinaryPath(version))
 	}
 
-	return mgr.Uninstall(version)
+	if name == "php" {
+		runtime.StopPHPCGIVersion(version)
+		cfg := config.Get()
+		if _, ok := cfg.PhpCgiPorts[version]; ok {
+			delete(cfg.PhpCgiPorts, version)
+			config.Save()
+		}
+	}
+
+	if err := mgr.Uninstall(version); err != nil {
+		return err
+	}
+	go a.regenerateAllVhosts()
+	return nil
 }
 
-// SetGlobalRuntime sets a version as the global active version
+// SetGlobalRuntime sets a version as the global active version. "Global" means:
+// first on the user PATH (CLI), the default FastCGI instance (PHP), and the
+// version every project without an explicit pin runs under.
 func (a *App) SetGlobalRuntime(name, version string) error {
 	mgr, ok := runtime.Registry[name]
 	if !ok {
@@ -312,7 +622,16 @@ func (a *App) SetGlobalRuntime(name, version string) error {
 		return err
 	}
 
-	return pathenv.AddToPath(mgr.BinaryPath(version))
+	if err := pathenv.AddToPath(mgr.BinaryPath(version)); err != nil {
+		return err
+	}
+
+	// The default php-cgi (port 9000) follows the global version; unpinned
+	// projects follow it too, so vhosts and instances are reconciled.
+	if name == "php" || name == "node" || name == "python" || name == "go" || name == "rust" {
+		go a.regenerateAllVhosts()
+	}
+	return nil
 }
 
 // GetGlobalRuntime returns the current global version for a runtime
@@ -364,20 +683,19 @@ func (a *App) GetServiceStatus() map[string]string {
 
 // GetAllServices returns info for all registered services
 func (a *App) GetAllServices() map[string]service.ServiceInfo {
-	result := service.GetAll()
-	for name, info := range result {
-		debugLog("GetAllServices: %s installed=%v status=%s port=%d version=%s", name, info.Installed, info.Status, info.Port, info.Version)
-	}
-	return result
+	return service.GetAll()
 }
 
-// GetServiceVersions returns available versions for a service
+// GetServiceVersions returns available versions for a service (cached).
 func (a *App) GetServiceVersions(name string) ([]service.AvailableVersion, error) {
-	mgr, ok := service.Registry[name]
-	if !ok {
-		return nil, fmt.Errorf("unknown service: %s", name)
-	}
-	return mgr.ListVersions()
+	versions, _, err := service.ListVersionsCached(name, false)
+	return versions, err
+}
+
+// RefreshServiceVersions re-fetches a service's version list.
+func (a *App) RefreshServiceVersions(name string) ([]service.AvailableVersion, error) {
+	versions, _, err := service.ListVersionsCached(name, true)
+	return versions, err
 }
 
 // CheckPort checks if a port is available
@@ -396,50 +714,123 @@ func (a *App) SetServicePort(name string, port int) error {
 	}
 
 	// If it's a web server, regenerate all project vhosts with the new port
-	if name == "nginx" || name == "apache" || name == "caddy" {
+	if name == "nginx" || name == "apache" || name == "caddy" || name == "frankenphp" {
 		a.regenerateAllVhosts()
 	}
 	return nil
 }
 
-// isPhpFramework returns true if the framework requires PHP-CGI
-func isPhpFramework(fw string) bool {
-	return !project.IsAppServer(fw) && fw != "Static" && fw != ""
+// isPhpProject reports whether a project is served through PHP FastCGI
+// (as opposed to running its own dev server or being static).
+func isPhpProject(p project.Project) bool {
+	return p.Runtime == "php"
 }
 
-// regenerateAllVhosts regenerates vhost configs for all projects using the current web server port
+// regenerateAllVhosts writes a vhost config per project to whichever webserver
+// the project picked (nginx / caddy / apache / frankenphp), or skips the project
+// when it runs its own dev server. Multiple webservers can co-exist — each one
+// is restarted exactly once at the end if it both holds new vhosts and is
+// currently running.
+//
+// PHP projects are handed to the php-cgi instance of the PHP version they
+// resolve to (their pin, or the global version), which is started here.
 func (a *App) regenerateAllVhosts() {
+	a.vhostMu.Lock()
+	defer a.vhostMu.Unlock()
+
 	projects, err := project.ListProjects()
-	if err != nil || len(projects) == 0 {
+	if err != nil {
 		return
 	}
 
-	// Always include PHP FastCGI block so PHP projects work
-	// when PHP-CGI starts (harmless for non-PHP projects).
-	phpCgiPort := 9000
+	// Which PHP versions do domain-bound PHP projects need?
+	var phpVersions []string
+	seen := map[string]bool{}
+	for _, p := range projects {
+		if p.Domain == "" || !isPhpProject(p) {
+			continue
+		}
+		ws := project.ResolveWebserver(p)
+		if ws == "" || ws == "devserver" || ws == "frankenphp" {
+			continue // FrankenPHP bundles its own PHP
+		}
+		if v := project.ResolveRuntimeVersion(p); v != "" && !seen[v] {
+			seen[v] = true
+			phpVersions = append(phpVersions, v)
+		}
+	}
+	phpPorts, phpErrs := runtime.EnsurePHPCGI(phpVersions)
+	for v, err := range phpErrs {
+		debugLog("php-cgi %s: %v", v, err)
+	}
 
-	if mgr, ok := service.Registry["nginx"]; ok && mgr.IsInstalled() {
-		for _, p := range projects {
-			project.GenerateNginxVhost(p, phpCgiPort, mgr.Port())
+	// Caddy appends per-project blocks to its Caddyfile: reset it first.
+	if mgr, ok := service.Registry["caddy"]; ok && mgr.IsInstalled() {
+		if cm, ok := mgr.(*service.CaddyManager); ok {
+			cm.ResetConfig()
 		}
-		if mgr.Status() == service.StatusRunning {
-			mgr.Restart()
+	}
+
+	// Track which webserver services received writes so we restart only those.
+	touched := map[string]bool{}
+
+	for _, p := range projects {
+		phpPort := 0
+		if isPhpProject(p) {
+			phpPort = phpPorts[project.ResolveRuntimeVersion(p)]
 		}
-	} else if mgr, ok := service.Registry["apache"]; ok && mgr.IsInstalled() {
-		for _, p := range projects {
-			project.GenerateApacheVhost(p, mgr.Port())
+		ws := project.ResolveWebserver(p)
+		switch ws {
+		case "nginx":
+			if mgr, ok := service.Registry["nginx"]; ok && mgr.IsInstalled() {
+				project.GenerateNginxVhost(p, phpPort, mgr.Port())
+				touched["nginx"] = true
+			}
+		case "apache":
+			if mgr, ok := service.Registry["apache"]; ok && mgr.IsInstalled() {
+				project.GenerateApacheVhost(p, mgr.Port(), phpPort)
+				touched["apache"] = true
+			}
+		case "caddy":
+			if mgr, ok := service.Registry["caddy"]; ok && mgr.IsInstalled() {
+				project.GenerateCaddyVhost(p, phpPort)
+				touched["caddy"] = true
+			}
+		case "frankenphp":
+			if mgr, ok := service.Registry["frankenphp"]; ok && mgr.IsInstalled() {
+				project.GenerateFrankenPHPVhost(p)
+				touched["frankenphp"] = true
+			}
+		case "devserver", "":
+			// No vhost: the front-door proxy routes traffic directly to the
+			// project's dev server port (or there's no backend at all).
 		}
-		if mgr.Status() == service.StatusRunning {
-			mgr.Restart()
-		}
-	} else if mgr, ok := service.Registry["caddy"]; ok && mgr.IsInstalled() {
-		for _, p := range projects {
-			project.GenerateCaddyVhost(p, phpCgiPort)
+	}
+
+	// Restart each touched webserver if it's currently running so it picks up
+	// its new vhost set. FrankenPHP supports live reload via the import glob —
+	// a restart still works and is simpler than wiring caddy admin API.
+	for name := range touched {
+		mgr, ok := service.Registry[name]
+		if !ok {
+			continue
 		}
 		if mgr.Status() == service.StatusRunning {
 			mgr.Restart()
 		}
 	}
+
+	// Refresh the front-door proxy's Caddyfile so domain routing stays in sync
+	// with the latest project list / runtime+webserver choices. No-op if the
+	// proxy isn't running yet.
+	if err := proxy.Reload(); err != nil {
+		debugLog("proxy reload failed: %v", err)
+	}
+}
+
+// RegenerateVhosts is the UI-triggered variant (e.g. after fixing a service).
+func (a *App) RegenerateVhosts() {
+	a.regenerateAllVhosts()
 }
 
 // InstallService installs a service with version and port selection
@@ -461,34 +852,73 @@ func (a *App) InstallService(name string, version string, port int) error {
 		return fmt.Errorf("%s is already installed. Uninstall it before installing %s", conflict, mgr.DisplayName())
 	}
 
-	// Run install entirely in background - return immediately to Wails
+	a.runServiceJob(name, func(progress chan<- service.Progress) error {
+		return mgr.Install(version, port, progress)
+	}, func() {
+		// A newly installed webserver should pick up existing projects.
+		if name == "nginx" || name == "apache" || name == "caddy" || name == "frankenphp" {
+			a.regenerateAllVhosts()
+		}
+	})
+	return nil
+}
+
+// UpdateService replaces an installed service with a newer version, keeping
+// its data and configuration. Same events as InstallService, plus
+// "updatedFrom" on service:installed.
+func (a *App) UpdateService(name string, version string) error {
+	mgr, ok := service.Registry[name]
+	if !ok {
+		return fmt.Errorf("unknown service: %s", name)
+	}
+	if !mgr.IsInstalled() {
+		return fmt.Errorf("%s is not installed", mgr.DisplayName())
+	}
+	from := mgr.Version()
+	debugLog("UpdateService: %s %s -> %s", name, from, version)
+
+	a.runServiceJob(name, func(progress chan<- service.Progress) error {
+		return service.Update(name, version, progress)
+	}, func() {
+		if name == "nginx" || name == "apache" || name == "caddy" || name == "frankenphp" {
+			a.regenerateAllVhosts()
+		}
+	})
+	return nil
+}
+
+// runServiceJob runs an install-like job in the background, forwarding
+// progress events and emitting service:installed / service:error at the end.
+func (a *App) runServiceJob(name string, job func(chan<- service.Progress) error, after func()) {
 	go func() {
 		progress := make(chan service.Progress, 10)
 
-		// Inner goroutine does the actual install
 		go func() {
 			defer close(progress)
 			defer func() {
 				if r := recover(); r != nil {
-					debugLog("InstallService PANIC: %v", r)
+					debugLog("service job PANIC: %v", r)
+					wailsRuntime.EventsEmit(a.ctx, "service:error", map[string]interface{}{
+						"name": name, "error": fmt.Sprintf("internal error: %v", r),
+					})
 				}
 			}()
-			err := mgr.Install(version, port, progress)
-			if err != nil {
-				debugLog("Install returned error: %v", err)
+			if err := job(progress); err != nil {
+				debugLog("service job %s error: %v", name, err)
 				wailsRuntime.EventsEmit(a.ctx, "service:error", map[string]interface{}{
 					"name":  name,
 					"error": err.Error(),
 				})
 				return
 			}
-			debugLog("Install returned OK, installed=%v", mgr.Info().Installed)
+			if after != nil {
+				after()
+			}
 			wailsRuntime.EventsEmit(a.ctx, "service:installed", map[string]interface{}{
 				"name": name,
 			})
 		}()
 
-		// Forward progress events to frontend
 		for p := range progress {
 			wailsRuntime.EventsEmit(a.ctx, "service:progress", map[string]interface{}{
 				"name":    name,
@@ -497,8 +927,6 @@ func (a *App) InstallService(name string, version string, port int) error {
 			})
 		}
 	}()
-
-	return nil
 }
 
 // UninstallService removes a service
@@ -577,14 +1005,20 @@ func (a *App) SetServiceAutoStart(name string, enabled bool) error {
 	return config.Save()
 }
 
-// SetAutoStart enables or disables DevBox launching at Windows login
+// SetAutoStart enables or disables DevBox launching at system login
 func (a *App) SetAutoStart(enabled bool) error {
-	if err := setWindowsAutoStart(enabled); err != nil {
+	if err := platform.SetAutoStart(enabled); err != nil {
 		return err
 	}
 	cfg := config.Get()
 	cfg.AutoStart = enabled
 	return config.Save()
+}
+
+// IsAutoStartEnabled reports the OS-level login entry (source of truth), not
+// just the config flag.
+func (a *App) IsAutoStartEnabled() bool {
+	return platform.IsAutoStartEnabled()
 }
 
 // --- PATH bindings ---
@@ -687,6 +1121,21 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 			},
 		}
 
+	case "frankenphp":
+		return ServiceDetailInfo{
+			ConnectionInfo: []ConnectionEntry{
+				{Label: "Host", Value: "127.0.0.1"},
+				{Label: "Port", Value: fmt.Sprintf("%d", port)},
+				{Label: "Document Root", Value: filepath.Join(baseDir, "html")},
+			},
+			ConfigFiles: []ConfigFileEntry{
+				{Label: "Caddyfile", Path: filepath.Join(baseDir, "Caddyfile")},
+			},
+			WebLinks: []WebLinkEntry{
+				{Label: "Open in Browser", URL: fmt.Sprintf("http://127.0.0.1:%d", port)},
+			},
+		}
+
 	case "postgres":
 		return ServiceDetailInfo{
 			ConnectionInfo: []ConnectionEntry{
@@ -712,7 +1161,7 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 				{Label: "CLI", Value: fmt.Sprintf("mysql -u root -h 127.0.0.1 -P %d", port)},
 			},
 			ConfigFiles: []ConfigFileEntry{
-				{Label: "my.ini", Path: filepath.Join(baseDir, "my.ini")},
+				{Label: service.MysqlConfigName(), Path: filepath.Join(baseDir, service.MysqlConfigName())},
 			},
 		}
 
@@ -726,7 +1175,7 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 				{Label: "CLI", Value: fmt.Sprintf("mysql -u root -h 127.0.0.1 -P %d", port)},
 			},
 			ConfigFiles: []ConfigFileEntry{
-				{Label: "my.ini", Path: filepath.Join(baseDir, "my.ini")},
+				{Label: service.MysqlConfigName(), Path: filepath.Join(baseDir, service.MysqlConfigName())},
 			},
 		}
 
@@ -794,7 +1243,7 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 // IsBunInstalled checks if Bun is installed
 func (a *App) IsBunInstalled() bool {
 	toolDir := filepath.Join(config.GetDataDir(), "tools", "bun")
-	_, err := os.Stat(filepath.Join(toolDir, "bun.exe"))
+	_, err := os.Stat(filepath.Join(toolDir, platform.BinaryName("bun")))
 	return err == nil
 }
 
@@ -804,22 +1253,24 @@ func (a *App) InstallBun() error {
 		toolDir := filepath.Join(config.GetDataDir(), "tools", "bun")
 		os.MkdirAll(toolDir, 0755)
 
+		assetName := bunAssetName()
+
 		// Fetch latest release URL from GitHub
 		downloadURL := ""
 		resp, err := runtime.FetchGitHubReleasesPublic("oven-sh", "bun")
 		if err == nil && len(resp) > 0 {
 			for _, asset := range resp[0].Assets {
-				if asset.Name == "bun-windows-x64.zip" {
+				if asset.Name == assetName {
 					downloadURL = asset.BrowserDownloadURL
 					break
 				}
 			}
 		}
 		if downloadURL == "" {
-			downloadURL = "https://github.com/oven-sh/bun/releases/latest/download/bun-windows-x64.zip"
+			downloadURL = "https://github.com/oven-sh/bun/releases/latest/download/" + assetName
 		}
 
-		tmpFile := filepath.Join(config.GetDataDir(), "tmp", "bun-windows-x64.zip")
+		tmpFile := filepath.Join(config.GetDataDir(), "tmp", assetName)
 		os.MkdirAll(filepath.Dir(tmpFile), 0755)
 
 		if err := runtime.DownloadFile(downloadURL, tmpFile, 0, nil); err != nil {
@@ -839,12 +1290,12 @@ func (a *App) InstallBun() error {
 		}
 
 		// Find bun.exe (may be in subdirectory bun-windows-x64/)
-		bunExe := filepath.Join(tmpExtract, "bun.exe")
+		bunExe := filepath.Join(tmpExtract, platform.BinaryName("bun"))
 		if _, err := os.Stat(bunExe); os.IsNotExist(err) {
 			entries, _ := os.ReadDir(tmpExtract)
 			for _, e := range entries {
 				if e.IsDir() {
-					candidate := filepath.Join(tmpExtract, e.Name(), "bun.exe")
+					candidate := filepath.Join(tmpExtract, e.Name(), platform.BinaryName("bun"))
 					if _, err := os.Stat(candidate); err == nil {
 						bunExe = candidate
 						break
@@ -864,7 +1315,7 @@ func (a *App) InstallBun() error {
 			wailsRuntime.EventsEmit(a.ctx, "bun:error", map[string]interface{}{"error": err.Error()})
 			return
 		}
-		if err := os.WriteFile(filepath.Join(toolDir, "bun.exe"), data, 0755); err != nil {
+		if err := os.WriteFile(filepath.Join(toolDir, platform.BinaryName("bun")), data, 0755); err != nil {
 			wailsRuntime.EventsEmit(a.ctx, "bun:error", map[string]interface{}{"error": err.Error()})
 			return
 		}
@@ -880,12 +1331,13 @@ func (a *App) InstallBun() error {
 // GetBunVersion returns installed Bun version
 func (a *App) GetBunVersion() string {
 	toolDir := filepath.Join(config.GetDataDir(), "tools", "bun")
-	bunExe := filepath.Join(toolDir, "bun.exe")
+	bunExe := filepath.Join(toolDir, platform.BinaryName("bun"))
 	if _, err := os.Stat(bunExe); os.IsNotExist(err) {
 		return ""
 	}
 
 	cmd := exec.Command(bunExe, "--version")
+	platform.SetProcessAttrs(cmd, false, true)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -900,11 +1352,185 @@ func (a *App) UninstallBun() error {
 	return os.RemoveAll(toolDir)
 }
 
-// --- PHP Extensions & Composer & PHP-CGI ---
+// bunAssetName picks the correct release asset for the current OS/arch.
+// Bun publishes per-platform zips on GitHub releases.
+func bunAssetName() string {
+	switch goruntime.GOOS {
+	case "darwin":
+		if goruntime.GOARCH == "arm64" {
+			return "bun-darwin-aarch64.zip"
+		}
+		return "bun-darwin-x64.zip"
+	default:
+		return "bun-windows-x64.zip"
+	}
+}
+
+// --- Yarn / pnpm Package Managers (corepack-based, per active Node version) ---
+
+// IsYarnEnabled reports whether yarn is available for the active Node version.
+func (a *App) IsYarnEnabled() bool {
+	return runtime.IsPkgMgrEnabled("yarn")
+}
+
+// EnableYarn enables yarn on the active Node version via corepack.
+// Runs asynchronously; emits "yarn:installed" on success or "yarn:error" on failure.
+func (a *App) EnableYarn() error {
+	go func() {
+		if err := runtime.EnablePkgMgr("yarn"); err != nil {
+			wailsRuntime.EventsEmit(a.ctx, "yarn:error", map[string]interface{}{"error": err.Error()})
+			return
+		}
+		wailsRuntime.EventsEmit(a.ctx, "yarn:installed", map[string]interface{}{})
+	}()
+	return nil
+}
+
+// DisableYarn removes the yarn shim from the active Node bin dir.
+func (a *App) DisableYarn() error {
+	return runtime.DisablePkgMgr("yarn")
+}
+
+// GetYarnVersion returns the active yarn version or "" if not enabled.
+func (a *App) GetYarnVersion() string {
+	return runtime.GetPkgMgrVersion("yarn")
+}
+
+// IsPnpmEnabled reports whether pnpm is available for the active Node version.
+func (a *App) IsPnpmEnabled() bool {
+	return runtime.IsPkgMgrEnabled("pnpm")
+}
+
+// EnablePnpm enables pnpm on the active Node version via corepack.
+func (a *App) EnablePnpm() error {
+	go func() {
+		if err := runtime.EnablePkgMgr("pnpm"); err != nil {
+			wailsRuntime.EventsEmit(a.ctx, "pnpm:error", map[string]interface{}{"error": err.Error()})
+			return
+		}
+		wailsRuntime.EventsEmit(a.ctx, "pnpm:installed", map[string]interface{}{})
+	}()
+	return nil
+}
+
+// DisablePnpm removes the pnpm shim from the active Node bin dir.
+func (a *App) DisablePnpm() error {
+	return runtime.DisablePkgMgr("pnpm")
+}
+
+// GetPnpmVersion returns the active pnpm version or "" if not enabled.
+func (a *App) GetPnpmVersion() string {
+	return runtime.GetPkgMgrVersion("pnpm")
+}
+
+// GetNpmVersion returns the npm version bundled with the active Node.
+func (a *App) GetNpmVersion() string {
+	return runtime.GetNpmVersion()
+}
+
+// GetNpmLatestVersion returns the newest npm release on the registry ("" offline).
+func (a *App) GetNpmLatestVersion() string {
+	return runtime.GetNpmLatestVersion()
+}
+
+// UpdateNpm upgrades npm inside the active Node version. Emits npm:updated / npm:error.
+func (a *App) UpdateNpm() error {
+	go func() {
+		if err := runtime.UpdateNpm(); err != nil {
+			wailsRuntime.EventsEmit(a.ctx, "npm:error", map[string]interface{}{"error": err.Error()})
+			return
+		}
+		wailsRuntime.EventsEmit(a.ctx, "npm:updated", map[string]interface{}{"version": runtime.GetNpmVersion()})
+	}()
+	return nil
+}
+
+// --- PHP Extensions & Settings & Composer & PHP-CGI ---
 
 // GetPHPExtensions returns extensions for a PHP version
 func (a *App) GetPHPExtensions(version string) ([]runtime.PHPExtension, error) {
 	return runtime.GetPHPExtensions(version)
+}
+
+// GetPeclExtensions returns the PECL catalog with install state for a PHP version.
+func (a *App) GetPeclExtensions(version string) []runtime.PeclExtension {
+	return runtime.GetPeclExtensions(version)
+}
+
+// InstallPeclExtension downloads + enables a PECL extension. Async; events:
+// phpext:progress {version,name,percent,message}, phpext:installed, phpext:error.
+func (a *App) InstallPeclExtension(version, name string) error {
+	go func() {
+		progress := make(chan runtime.Progress, 10)
+		go func() {
+			defer close(progress)
+			if err := runtime.InstallPeclExtension(version, name, progress); err != nil {
+				wailsRuntime.EventsEmit(a.ctx, "phpext:error", map[string]interface{}{"version": version, "name": name, "error": err.Error()})
+				return
+			}
+			wailsRuntime.EventsEmit(a.ctx, "phpext:installed", map[string]interface{}{"version": version, "name": name})
+		}()
+		for p := range progress {
+			wailsRuntime.EventsEmit(a.ctx, "phpext:progress", map[string]interface{}{"version": version, "name": name, "percent": p.Percent, "message": p.Message})
+		}
+	}()
+	return nil
+}
+
+// UninstallPeclExtension disables and removes a PECL extension.
+func (a *App) UninstallPeclExtension(version, name string) error {
+	return runtime.UninstallPeclExtension(version, name)
+}
+
+// --- App updates (GitHub Releases) ---
+
+// GetAppVersion returns the running build's version.
+func (a *App) GetAppVersion() string {
+	return updater.Version
+}
+
+// CheckForUpdate queries GitHub Releases for a newer DevBox.
+func (a *App) CheckForUpdate() updater.Release {
+	return updater.Check()
+}
+
+// GetLastUpdateCheck returns the cached result of the last check.
+func (a *App) GetLastUpdateCheck() updater.Release {
+	return updater.Last()
+}
+
+// InstallAppUpdate downloads the installer and launches it, then quits DevBox.
+// Events: appupdate:progress {percent,message}, appupdate:error {error}.
+func (a *App) InstallAppUpdate() error {
+	go func() {
+		_, err := updater.DownloadAndInstall(func(pct int, msg string) {
+			wailsRuntime.EventsEmit(a.ctx, "appupdate:progress", map[string]interface{}{"percent": pct, "message": msg})
+		})
+		if err != nil {
+			wailsRuntime.EventsEmit(a.ctx, "appupdate:error", map[string]interface{}{"error": err.Error()})
+			return
+		}
+		if goruntime.GOOS == "windows" {
+			time.Sleep(1500 * time.Millisecond)
+			a.quit()
+		}
+	}()
+	return nil
+}
+
+// GetPHPIniSettings returns common php.ini directive values for a PHP version
+func (a *App) GetPHPIniSettings(version string) (map[string]string, error) {
+	return runtime.GetPHPIniSettings(version)
+}
+
+// SetPHPIniSetting updates a single php.ini directive
+func (a *App) SetPHPIniSetting(version, key, value string) error {
+	return runtime.SetPHPIniSetting(version, key, value)
+}
+
+// GetPHPIniPath returns the php.ini file path for a PHP version
+func (a *App) GetPHPIniPath(version string) string {
+	return runtime.GetPHPIniPath(version)
 }
 
 // TogglePHPExtension toggles a PHP extension
@@ -947,14 +1573,26 @@ func (a *App) GetComposerVersion() string {
 	return runtime.GetComposerVersion()
 }
 
-// StartPHPCGI starts php-cgi in FastCGI mode
+// GetPHPCGIInstances lists running php-cgi processes (one per PHP version in use).
+func (a *App) GetPHPCGIInstances() []runtime.PHPCGIInstance {
+	return runtime.RunningPHPCGIInstances()
+}
+
+// StartPHPCGI starts the FastCGI instance for a PHP version on its managed port.
 func (a *App) StartPHPCGI(version string, port int) error {
 	return runtime.StartPHPCGI(version, port)
 }
 
-// StopPHPCGI stops the running php-cgi
+// StopPHPCGI stops every php-cgi instance.
 func (a *App) StopPHPCGI() error {
 	return runtime.StopPHPCGI()
+}
+
+// RestartPHPCGI restarts every php-cgi instance projects need (picks up php.ini edits).
+func (a *App) RestartPHPCGI() error {
+	runtime.StopPHPCGI()
+	a.regenerateAllVhosts()
+	return nil
 }
 
 // IsPHPCGIRunning checks if php-cgi is running
@@ -971,14 +1609,20 @@ func (a *App) ListProjects() ([]project.Project, error) {
 
 // AddProject adds a project from a selected folder
 func (a *App) AddProject(projectPath, domain string) (*project.Project, error) {
-	return project.AddProject(projectPath, domain)
+	p, err := project.AddProject(projectPath, domain)
+	if err == nil {
+		go a.regenerateAllVhosts()
+	}
+	return p, err
 }
 
 // RemoveProject removes a project
 func (a *App) RemoveProject(name string) error {
-	// Remove vhost
 	project.RemoveNginxVhost(name)
-	// Remove hosts entry
+	project.RemoveApacheVhost(name)
+	project.RemoveFrankenPHPVhost(name)
+	tunnel.StopTunnel(name)
+	tunnel.StopNamedTunnel(name)
 	projects, _ := project.ListProjects()
 	for _, p := range projects {
 		if p.Name == name {
@@ -986,7 +1630,11 @@ func (a *App) RemoveProject(name string) error {
 			break
 		}
 	}
-	return project.RemoveProject(name)
+	if err := project.RemoveProject(name); err != nil {
+		return err
+	}
+	go a.regenerateAllVhosts()
+	return nil
 }
 
 // DetectFramework detects framework for a path
@@ -1003,7 +1651,11 @@ func (a *App) SetProjectPort(name string, port int) error {
 	for i, p := range projects {
 		if p.Name == name {
 			projects[i].Port = port
-			return project.SaveProjects(projects)
+			if err := project.SaveProjects(projects); err != nil {
+				return err
+			}
+			go a.regenerateAllVhosts()
+			return nil
 		}
 	}
 	return fmt.Errorf("project not found: %s", name)
@@ -1021,51 +1673,11 @@ func (a *App) SetupProjectDomain(name string) error {
 			if err := project.AddHostsEntry(p.Domain); err != nil {
 				return err
 			}
-
-			// Always include PHP FastCGI block so PHP projects work
-			// when PHP-CGI starts (harmless for non-PHP projects).
-			phpCgiPort := 9000
-
-			// Auto-start PHP-CGI for PHP-based projects
-			if isPhpFramework(p.Framework) && !runtime.IsPHPCGIRunning() {
-				if phpMgr, ok := runtime.Registry["php"]; ok {
-					if ver, _ := phpMgr.GetGlobal(); ver != "" {
-						runtime.StartPHPCGI(ver, phpCgiPort)
-					}
-				}
+			if ws := project.ResolveWebserver(p); ws == "" {
+				return fmt.Errorf("no web server installed")
 			}
-
-			// Generate vhost based on installed web server
-			if mgr, ok := service.Registry["nginx"]; ok && mgr.IsInstalled() {
-				if err := project.GenerateNginxVhost(p, phpCgiPort, mgr.Port()); err != nil {
-					return err
-				}
-				// Reload nginx to pick up the new vhost
-				if mgr.Status() == service.StatusRunning {
-					mgr.Restart()
-				}
-				return nil
-			}
-			if mgr, ok := service.Registry["apache"]; ok && mgr.IsInstalled() {
-				if err := project.GenerateApacheVhost(p, mgr.Port()); err != nil {
-					return err
-				}
-				if mgr.Status() == service.StatusRunning {
-					mgr.Restart()
-				}
-				return nil
-			}
-			if mgr, ok := service.Registry["caddy"]; ok && mgr.IsInstalled() {
-				if err := project.GenerateCaddyVhost(p, phpCgiPort); err != nil {
-					return err
-				}
-				if mgr.Status() == service.StatusRunning {
-					mgr.Restart()
-				}
-				return nil
-			}
-
-			return fmt.Errorf("no web server installed")
+			a.regenerateAllVhosts()
+			return nil
 		}
 	}
 	return fmt.Errorf("project not found: %s", name)
@@ -1091,26 +1703,10 @@ func (a *App) ToggleProjectSSL(name string, enable bool) error {
 				}
 			}
 			projects[i].SSL = enable
-			project.SaveProjects(projects)
-
-			phpCgiPort := 9000
-
-			// Regenerate vhost with/without SSL
-			if mgr, ok := service.Registry["nginx"]; ok && mgr.IsInstalled() {
-				if err := project.GenerateNginxVhost(projects[i], phpCgiPort, mgr.Port()); err != nil {
-					return err
-				}
-				if mgr.Status() == service.StatusRunning {
-					mgr.Restart()
-				}
-			} else if mgr, ok := service.Registry["apache"]; ok && mgr.IsInstalled() {
-				if err := project.GenerateApacheVhost(projects[i], mgr.Port()); err != nil {
-					return err
-				}
-				if mgr.Status() == service.StatusRunning {
-					mgr.Restart()
-				}
+			if err := project.SaveProjects(projects); err != nil {
+				return err
 			}
+			a.regenerateAllVhosts()
 			return nil
 		}
 	}
@@ -1119,19 +1715,21 @@ func (a *App) ToggleProjectSSL(name string, enable bool) error {
 
 // GetProjectVhostPath returns the vhost config file path for a project
 func (a *App) GetProjectVhostPath(name string) string {
-	for _, wsName := range []string{"nginx", "apache", "caddy"} {
-		mgr, ok := service.Registry[wsName]
-		if !ok || !mgr.IsInstalled() {
+	projects, _ := project.ListProjects()
+	for _, p := range projects {
+		if p.Name != name {
 			continue
 		}
-		base := filepath.Join(config.GetDataDir(), "services", wsName)
-		switch wsName {
+		base := filepath.Join(config.GetDataDir(), "services")
+		switch project.ResolveWebserver(p) {
 		case "nginx":
-			return filepath.Join(base, "conf", "vhosts", name+".conf")
+			return filepath.Join(base, "nginx", "conf", "vhosts", name+".conf")
 		case "apache":
-			return filepath.Join(base, "conf", "extra", "vhost-"+name+".conf")
+			return filepath.Join(base, "apache", "conf", "extra", "vhost-"+name+".conf")
 		case "caddy":
-			return filepath.Join(base, "Caddyfile")
+			return filepath.Join(base, "caddy", "Caddyfile")
+		case "frankenphp":
+			return filepath.Join(base, "frankenphp", "vhosts", name+".caddy")
 		}
 	}
 	return ""
@@ -1147,8 +1745,16 @@ func (a *App) SelectProjectFolder() (string, error) {
 // SelectParentFolder opens a folder selection dialog for choosing a parent directory
 func (a *App) SelectParentFolder() (string, error) {
 	return wailsRuntime.OpenDirectoryDialog(a.ctx, wailsRuntime.OpenDialogOptions{
-		Title: "Select Parent Folder",
+		Title:            "Select Parent Folder",
+		DefaultDirectory: filepath.Join(config.GetDataDir(), "projects"),
 	})
+}
+
+// GetDefaultProjectsDir returns <data>/projects — the suggested home for new projects.
+func (a *App) GetDefaultProjectsDir() string {
+	dir := filepath.Join(config.GetDataDir(), "projects")
+	os.MkdirAll(dir, 0755)
+	return dir
 }
 
 // GetAvailableTemplates returns framework templates with availability info
@@ -1158,6 +1764,9 @@ func (a *App) GetAvailableTemplates() []project.FrameworkTemplate {
 
 // ScaffoldNewProject creates a new project from a template
 func (a *App) ScaffoldNewProject(templateID, parentDir, name, domain string) error {
+	if parentDir == "" {
+		parentDir = a.GetDefaultProjectsDir()
+	}
 	go func() {
 		progress := make(chan project.ScaffoldProgress, 10)
 
@@ -1179,6 +1788,7 @@ func (a *App) ScaffoldNewProject(templateID, parentDir, name, domain string) err
 				})
 				return
 			}
+			a.regenerateAllVhosts()
 
 			wailsRuntime.EventsEmit(a.ctx, "scaffold:complete", map[string]interface{}{
 				"name": name,
@@ -1199,6 +1809,9 @@ func (a *App) ScaffoldNewProject(templateID, parentDir, name, domain string) err
 
 // CloneGitProject clones a git repo and registers it as a project
 func (a *App) CloneGitProject(gitURL, parentDir, name, domain string) error {
+	if parentDir == "" {
+		parentDir = a.GetDefaultProjectsDir()
+	}
 	go func() {
 		progress := make(chan project.ScaffoldProgress, 10)
 
@@ -1226,6 +1839,7 @@ func (a *App) CloneGitProject(gitURL, parentDir, name, domain string) error {
 				})
 				return
 			}
+			a.regenerateAllVhosts()
 
 			wailsRuntime.EventsEmit(a.ctx, "clone:complete", map[string]interface{}{
 				"name": actualName,
@@ -1333,6 +1947,48 @@ func (a *App) SetProjectStartCommand(name string, cmd string) error {
 	return fmt.Errorf("project not found: %s", name)
 }
 
+// SetProjectRuntime overrides a project's runtime (php/node/go/python/rust/static).
+// Empty string resets the field — the runtime is then re-derived from Framework.
+// Triggers a vhost regen so the front-door + per-webserver configs follow suit.
+func (a *App) SetProjectRuntime(name, rt string) error {
+	debugLog("SetProjectRuntime: name=%s runtime=%q", name, rt)
+	if err := project.SetProjectRuntime(name, rt); err != nil {
+		debugLog("SetProjectRuntime ERROR: %v", err)
+		return err
+	}
+	a.regenerateAllVhosts()
+	return nil
+}
+
+// SetProjectRuntimeVersion pins a project to a specific runtime version. Empty
+// string clears the pin, falling back to the globally active version. PHP
+// projects get their own php-cgi instance for the pinned version.
+func (a *App) SetProjectRuntimeVersion(name, version string) error {
+	if err := project.SetProjectRuntimeVersion(name, version); err != nil {
+		return err
+	}
+	a.regenerateAllVhosts()
+	return nil
+}
+
+// SetProjectWebserver overrides which webserver routes the project's domain
+// (nginx/caddy/apache/frankenphp/devserver). Empty = auto, derived from Runtime.
+// Triggers a vhost regen so the chosen webserver actually picks up the project.
+func (a *App) SetProjectWebserver(name, ws string) error {
+	debugLog("SetProjectWebserver: name=%s webserver=%q", name, ws)
+	if err := project.SetProjectWebserver(name, ws); err != nil {
+		debugLog("SetProjectWebserver ERROR: %v", err)
+		return err
+	}
+	a.regenerateAllVhosts()
+	return nil
+}
+
+// SetProjectPublicHostname sets the custom-domain hostname used by named tunnels.
+func (a *App) SetProjectPublicHostname(name, hostname string) error {
+	return project.SetProjectPublicHostname(name, hostname)
+}
+
 // GetWebServerPort returns the port of the installed web server (nginx/apache/caddy), or 0
 func (a *App) GetWebServerPort() int {
 	for _, name := range []string{"nginx", "apache", "caddy"} {
@@ -1343,10 +1999,9 @@ func (a *App) GetWebServerPort() int {
 	return 0
 }
 
-// OpenProjectFolder opens a project folder in file explorer
+// OpenProjectFolder opens a project folder in the system file explorer
 func (a *App) OpenProjectFolder(path string) error {
-	cmd := exec.Command("explorer", path)
-	return cmd.Start()
+	return platform.OpenFolder(path)
 }
 
 // --- Database Tools ---
@@ -1377,10 +2032,122 @@ func (a *App) LaunchExternalTool(toolID, serviceName string) error {
 	return tools.LaunchExternalTool(toolID, args)
 }
 
+// IsAdminerServerRunning reports whether the bundled PHP dev server hosting Adminer is up.
+func (a *App) IsAdminerServerRunning() bool {
+	return tools.IsAdminerServerRunning()
+}
+
+// GetAdminerURL returns the loopback URL the running Adminer server is reachable at.
+func (a *App) GetAdminerURL() string {
+	return tools.GetAdminerServerURL()
+}
+
+// OpenAdminer starts the bundled Adminer server (if not already running) using the
+// active PHP version's built-in web server, then opens it in the default browser.
+// Requires Adminer to be installed and an active PHP runtime to be set as global.
+func (a *App) OpenAdminer() error {
+	if !tools.IsAdminerInstalled() {
+		return fmt.Errorf("Adminer is not installed")
+	}
+	phpMgr := runtime.NewPHPManager()
+	activeVer, _ := phpMgr.GetGlobal()
+	if activeVer == "" {
+		return fmt.Errorf("no active PHP version — install PHP and set it as global first")
+	}
+	phpBinDir := phpMgr.BinaryPath(activeVer)
+	if err := tools.StartAdminerServer(phpBinDir); err != nil {
+		return err
+	}
+	wailsRuntime.BrowserOpenURL(a.ctx, tools.GetAdminerServerURL())
+	return nil
+}
+
+// StopAdminerServer kills the bundled Adminer dev server process.
+func (a *App) StopAdminerServer() error {
+	return tools.StopAdminerServer()
+}
+
+// UninstallAdminer stops the server (if running) and removes Adminer files.
+func (a *App) UninstallAdminer() error {
+	return tools.UninstallAdminer()
+}
+
+// --- Front-door Proxy ---
+
+// ProxyStatus is what the frontend renders on the Dashboard.
+type ProxyStatus struct {
+	Installed bool `json:"installed"`
+	Running   bool `json:"running"`
+	Enabled   bool `json:"enabled"`
+	Port      int  `json:"port"`
+}
+
+// GetProxyStatus reports install/run/enabled state of the front-door proxy.
+func (a *App) GetProxyStatus() ProxyStatus {
+	cfg := config.Get()
+	return ProxyStatus{
+		Installed: proxy.IsInstalled(),
+		Running:   proxy.IsRunning(),
+		Enabled:   cfg.ProxyEnabled,
+		Port:      proxy.HTTPPort,
+	}
+}
+
+// InstallProxy downloads the bundled Caddy binary used as DevBox's front-door.
+func (a *App) InstallProxy() error {
+	return proxy.Install()
+}
+
+// UninstallProxy stops the proxy and removes its bundled binary + config.
+// Also clears the auto-start preference so it doesn't try to come back next launch.
+func (a *App) UninstallProxy() error {
+	if err := proxy.Uninstall(); err != nil {
+		return err
+	}
+	if cfg := config.Get(); cfg != nil {
+		cfg.ProxyEnabled = false
+	}
+	return config.Save()
+}
+
+// StartProxy launches the front-door proxy. Sets ProxyEnabled so DevBox brings
+// it back automatically on next launch.
+func (a *App) StartProxy() error {
+	if err := proxy.Start(); err != nil {
+		return err
+	}
+	if cfg := config.Get(); cfg != nil {
+		cfg.ProxyEnabled = true
+	}
+	return config.Save()
+}
+
+// StopProxy stops the proxy and clears ProxyEnabled — DevBox won't auto-start
+// it next launch until the user explicitly clicks Start again.
+func (a *App) StopProxy() error {
+	if err := proxy.Stop(); err != nil {
+		return err
+	}
+	if cfg := config.Get(); cfg != nil {
+		cfg.ProxyEnabled = false
+	}
+	return config.Save()
+}
+
+// ReloadProxy rewrites the Caddyfile from the current project list and asks
+// the running proxy to apply it without restart.
+func (a *App) ReloadProxy() error {
+	return proxy.Reload()
+}
+
+// GetProxyLogPath returns the proxy log file path for diagnostics.
+func (a *App) GetProxyLogPath() string {
+	return proxy.LogPath()
+}
+
 // OpenFileInEditor opens a file in the default system editor
 func (a *App) OpenFileInEditor(path string) error {
-	cmd := exec.Command("cmd", "/c", "start", "", path)
-	return cmd.Start()
+	return platform.OpenFile(path)
 }
 
 // OpenInBrowser opens a URL in the default browser
@@ -1400,14 +2167,33 @@ func (a *App) InstallCloudflared() error {
 	return tunnel.InstallCloudflared()
 }
 
-// StartTunnel starts a cloudflared quick tunnel for a specific project
+// StartTunnel exposes a project publicly. Projects with a PublicHostname use
+// the linked Cloudflare account (custom domain); everything else gets a
+// random *.trycloudflare.com quick tunnel.
 func (a *App) StartTunnel(port int, projectName string, domain string, ssl bool) error {
+	projects, _ := project.ListProjects()
+	for _, p := range projects {
+		if p.Name != projectName || p.PublicHostname == "" {
+			continue
+		}
+		if !tunnel.GetCloudflareStatus().Configured {
+			return fmt.Errorf("%s has a custom hostname but no Cloudflare account is linked — add your API token in Settings, or clear the hostname to use a quick tunnel", projectName)
+		}
+		origin := fmt.Sprintf("http://127.0.0.1:%d", port)
+		if ssl {
+			origin = "https://127.0.0.1:443"
+		}
+		return tunnel.StartNamedTunnel(projectName, p.PublicHostname, origin, domain, ssl)
+	}
 	return tunnel.StartTunnel(port, projectName, domain, ssl)
 }
 
-// StopTunnel stops the tunnel for a specific project
+// StopTunnel stops the tunnel for a specific project (quick or custom-domain).
 func (a *App) StopTunnel(projectName string) error {
-	return tunnel.StopTunnel(projectName)
+	if err := tunnel.StopTunnel(projectName); err != nil {
+		return err
+	}
+	return tunnel.StopNamedTunnel(projectName)
 }
 
 // GetTunnelURL returns the public tunnel URL for a specific project
@@ -1423,4 +2209,35 @@ func (a *App) IsTunnelRunning(projectName string) bool {
 // GetRunningTunnels returns all running tunnels as a map of project name to URL
 func (a *App) GetRunningTunnels() map[string]string {
 	return tunnel.GetRunningTunnels()
+}
+
+// GetCloudflareStatus summarises the linked account and connector state.
+func (a *App) GetCloudflareStatus() tunnel.CloudflareStatus {
+	return tunnel.GetCloudflareStatus()
+}
+
+// CloudflareVerifyResult is what the Settings page uses to offer account/zone pickers.
+type CloudflareVerifyResult struct {
+	Accounts []tunnel.CFAccount `json:"accounts"`
+	Zones    []tunnel.CFZone    `json:"zones"`
+}
+
+// VerifyCloudflareToken validates an API token and lists what it can manage.
+func (a *App) VerifyCloudflareToken(token string) (CloudflareVerifyResult, error) {
+	accounts, zones, err := tunnel.VerifyCloudflareToken(token)
+	if err != nil {
+		return CloudflareVerifyResult{}, err
+	}
+	sort.Slice(zones, func(i, j int) bool { return zones[i].Name < zones[j].Name })
+	return CloudflareVerifyResult{Accounts: accounts, Zones: zones}, nil
+}
+
+// ConfigureCloudflare links the account/zone and creates this machine's tunnel.
+func (a *App) ConfigureCloudflare(token, accountID, accountName, zoneID, zoneName string) error {
+	return tunnel.ConfigureCloudflare(token, accountID, accountName, zoneID, zoneName)
+}
+
+// DisconnectCloudflare removes all custom-domain routes and forgets the token.
+func (a *App) DisconnectCloudflare() error {
+	return tunnel.DisconnectCloudflare()
 }

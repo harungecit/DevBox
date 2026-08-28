@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,6 +30,13 @@ func (p *PHPManager) Name() string {
 }
 
 func (p *PHPManager) ListRemote() ([]Version, error) {
+	if goruntime.GOOS == "darwin" {
+		return p.listRemoteDarwin()
+	}
+	return p.listRemoteWindows()
+}
+
+func (p *PHPManager) listRemoteWindows() ([]Version, error) {
 	// Fetch the releases page to find available versions
 	resp, err := http.Get(phpReleasesURL)
 	if err != nil {
@@ -85,6 +93,62 @@ func (p *PHPManager) ListRemote() ([]Version, error) {
 	return versions, nil
 }
 
+func (p *PHPManager) listRemoteDarwin() ([]Version, error) {
+	releases, err := FetchGitHubReleasesPublic("shivammathur", "php-builder-darwin")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch PHP versions for macOS: %w", err)
+	}
+
+	global, _ := p.GetGlobal()
+	seen := map[string]bool{}
+	var versions []Version
+
+	arch := goruntime.GOARCH // "arm64" or "amd64"
+	suffix := fmt.Sprintf("darwin-%s.tar.gz", arch)
+
+	for _, rel := range releases {
+		// Tags are like "php-8.3.0"
+		ver := strings.TrimPrefix(rel.TagName, "php-")
+		if ver == "" || seen[ver] || !isValidPHPVersion(ver) {
+			continue
+		}
+
+		// Check if there's an asset for our architecture
+		hasAsset := false
+		for _, asset := range rel.Assets {
+			if strings.Contains(asset.Name, suffix) {
+				hasAsset = true
+				break
+			}
+		}
+		if !hasAsset {
+			continue
+		}
+
+		seen[ver] = true
+		versions = append(versions, Version{
+			Number:  ver,
+			Stable:  true,
+			Current: ver == global,
+		})
+	}
+
+	if len(versions) > 20 {
+		versions = versions[:20]
+	}
+
+	return versions, nil
+}
+
+func isValidPHPVersion(ver string) bool {
+	parts := strings.Split(ver, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	major, _ := strconv.Atoi(parts[0])
+	return major >= 7
+}
+
 func (p *PHPManager) ListInstalled() ([]Version, error) {
 	installed, err := listInstalledVersions("php")
 	if err != nil {
@@ -110,13 +174,20 @@ func (p *PHPManager) ListInstalled() ([]Version, error) {
 }
 
 func (p *PHPManager) Install(version string, progress chan<- Progress) error {
+	if goruntime.GOOS == "darwin" {
+		return p.installDarwin(version, progress)
+	}
+	return p.installWindows(version, progress)
+}
+
+func (p *PHPManager) installWindows(version string, progress chan<- Progress) error {
 	destDir := filepath.Join(runtimeBaseDir("php"), version)
 	if _, err := os.Stat(destDir); err == nil {
 		return fmt.Errorf("PHP %s is already installed", version)
 	}
 
 	// Find the correct filename by checking the releases page
-	filename, err := p.findFilename(version)
+	filename, err := p.findWindowsFilename(version)
 	if err != nil {
 		return err
 	}
@@ -124,7 +195,7 @@ func (p *PHPManager) Install(version string, progress chan<- Progress) error {
 	downloadURL := phpReleasesURL + filename
 
 	// Get SHA256
-	expectedHash := p.fetchSHA256(filename)
+	expectedHash := p.fetchWindowsSHA256(filename)
 
 	tmpFile := filepath.Join(tmpDir(), filename)
 
@@ -156,10 +227,96 @@ func (p *PHPManager) Install(version string, progress chan<- Progress) error {
 	os.Remove(tmpFile)
 
 	if progress != nil {
+		progress <- Progress{Percent: 95, Message: "Configuring dev preset (extensions + ini tuning)..."}
+	}
+	if err := ApplyDevPreset(version); err != nil {
+		// Don't fail the install — the binary is usable; surface the warning instead.
+		if progress != nil {
+			progress <- Progress{Percent: 98, Message: "Dev preset warning: " + err.Error()}
+		}
+	}
+
+	if progress != nil {
 		progress <- Progress{Percent: 100, Message: "PHP " + version + " installed"}
 	}
 
 	return nil
+}
+
+func (p *PHPManager) installDarwin(version string, progress chan<- Progress) error {
+	destDir := filepath.Join(runtimeBaseDir("php"), version)
+	if _, err := os.Stat(destDir); err == nil {
+		return fmt.Errorf("PHP %s is already installed", version)
+	}
+
+	arch := goruntime.GOARCH
+	assetName := fmt.Sprintf("php-%s-darwin-%s.tar.gz", version, arch)
+	downloadURL, err := p.findDarwinURL(version, assetName)
+	if err != nil {
+		return err
+	}
+
+	tmpFile := filepath.Join(tmpDir(), assetName)
+	if err := DownloadFile(downloadURL, tmpFile, 0, progress); err != nil {
+		return err
+	}
+
+	tmpExtract := filepath.Join(tmpDir(), fmt.Sprintf("php-%s-extract", version))
+	os.RemoveAll(tmpExtract)
+
+	if err := ExtractTarGz(tmpFile, tmpExtract, progress); err != nil {
+		os.Remove(tmpFile)
+		return err
+	}
+
+	// Find the extracted directory - might be in a subdirectory
+	extractedDir := tmpExtract
+	entries, _ := os.ReadDir(tmpExtract)
+	if len(entries) == 1 && entries[0].IsDir() {
+		extractedDir = filepath.Join(tmpExtract, entries[0].Name())
+	}
+
+	os.MkdirAll(filepath.Dir(destDir), 0755)
+	if err := os.Rename(extractedDir, destDir); err != nil {
+		return fmt.Errorf("failed to move PHP: %w", err)
+	}
+
+	os.Remove(tmpFile)
+	os.RemoveAll(tmpExtract)
+
+	if progress != nil {
+		progress <- Progress{Percent: 95, Message: "Configuring dev preset (extensions + ini tuning)..."}
+	}
+	if err := ApplyDevPreset(version); err != nil {
+		if progress != nil {
+			progress <- Progress{Percent: 98, Message: "Dev preset warning: " + err.Error()}
+		}
+	}
+
+	if progress != nil {
+		progress <- Progress{Percent: 100, Message: "PHP " + version + " installed"}
+	}
+	return nil
+}
+
+func (p *PHPManager) findDarwinURL(version, assetName string) (string, error) {
+	releases, err := FetchGitHubReleasesPublic("shivammathur", "php-builder-darwin")
+	if err != nil {
+		return "", err
+	}
+
+	tag := "php-" + version
+	for _, rel := range releases {
+		if rel.TagName == tag {
+			for _, asset := range rel.Assets {
+				if asset.Name == assetName {
+					return asset.BrowserDownloadURL, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("PHP %s not found for macOS/%s", version, goruntime.GOARCH)
 }
 
 func (p *PHPManager) Uninstall(version string) error {
@@ -183,11 +340,14 @@ func (p *PHPManager) GetGlobal() (string, error) {
 }
 
 func (p *PHPManager) BinaryPath(version string) string {
-	return filepath.Join(runtimeBaseDir("php"), version)
+	if goruntime.GOOS == "windows" {
+		return filepath.Join(runtimeBaseDir("php"), version)
+	}
+	return filepath.Join(runtimeBaseDir("php"), version, "bin")
 }
 
-// findFilename finds the NTS x64 zip filename for a given PHP version
-func (p *PHPManager) findFilename(version string) (string, error) {
+// findWindowsFilename finds the NTS x64 zip filename for a given PHP version on Windows
+func (p *PHPManager) findWindowsFilename(version string) (string, error) {
 	resp, err := http.Get(phpReleasesURL)
 	if err != nil {
 		return "", err
@@ -209,8 +369,8 @@ func (p *PHPManager) findFilename(version string) (string, error) {
 	return match[1], nil
 }
 
-// fetchSHA256 gets the SHA256 hash for a specific file
-func (p *PHPManager) fetchSHA256(filename string) string {
+// fetchWindowsSHA256 gets the SHA256 hash for a specific file from windows.php.net
+func (p *PHPManager) fetchWindowsSHA256(filename string) string {
 	resp, err := http.Get(phpSHA256URL)
 	if err != nil {
 		return ""

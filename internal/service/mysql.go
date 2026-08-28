@@ -7,16 +7,34 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strings"
+
+	"DevBox/internal/platform"
 )
 
-// Known MySQL download URLs - last 5 versions
-var mysqlKnownVersions = []AvailableVersion{
-	{Version: "9.2.0", Label: "9.2.0 (Innovation)", URL: "https://cdn.mysql.com/Downloads/MySQL-9.2/mysql-9.2.0-winx64.zip"},
-	{Version: "9.1.0", Label: "9.1.0 (Innovation)", URL: "https://cdn.mysql.com/Downloads/MySQL-9.1/mysql-9.1.0-winx64.zip"},
-	{Version: "9.0.1", Label: "9.0.1 (Innovation)", URL: "https://cdn.mysql.com/Downloads/MySQL-9.0/mysql-9.0.1-winx64.zip"},
-	{Version: "8.4.4", Label: "8.4.4 (LTS)", URL: "https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.4-winx64.zip"},
-	{Version: "8.0.41", Label: "8.0.41", URL: "https://cdn.mysql.com/Downloads/MySQL-8.0/mysql-8.0.41-winx64.zip"},
+// mysqlKnownVersionsList returns platform-appropriate MySQL download URLs
+func mysqlKnownVersionsList() []AvailableVersion {
+	if goruntime.GOOS == "darwin" {
+		arch := "arm64"
+		if goruntime.GOARCH == "amd64" {
+			arch = "x86_64"
+		}
+		return []AvailableVersion{
+			{Version: "9.2.0", Label: "9.2.0 (Innovation)", URL: fmt.Sprintf("https://cdn.mysql.com/Downloads/MySQL-9.2/mysql-9.2.0-macos14-%s.tar.gz", arch)},
+			{Version: "9.1.0", Label: "9.1.0 (Innovation)", URL: fmt.Sprintf("https://cdn.mysql.com/Downloads/MySQL-9.1/mysql-9.1.0-macos14-%s.tar.gz", arch)},
+			{Version: "9.0.1", Label: "9.0.1 (Innovation)", URL: fmt.Sprintf("https://cdn.mysql.com/Downloads/MySQL-9.0/mysql-9.0.1-macos14-%s.tar.gz", arch)},
+			{Version: "8.4.4", Label: "8.4.4 (LTS)", URL: fmt.Sprintf("https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.4-macos14-%s.tar.gz", arch)},
+			{Version: "8.0.41", Label: "8.0.41", URL: fmt.Sprintf("https://cdn.mysql.com/Downloads/MySQL-8.0/mysql-8.0.41-macos14-%s.tar.gz", arch)},
+		}
+	}
+	return []AvailableVersion{
+		{Version: "9.2.0", Label: "9.2.0 (Innovation)", URL: "https://cdn.mysql.com/Downloads/MySQL-9.2/mysql-9.2.0-winx64.zip"},
+		{Version: "9.1.0", Label: "9.1.0 (Innovation)", URL: "https://cdn.mysql.com/Downloads/MySQL-9.1/mysql-9.1.0-winx64.zip"},
+		{Version: "9.0.1", Label: "9.0.1 (Innovation)", URL: "https://cdn.mysql.com/Downloads/MySQL-9.0/mysql-9.0.1-winx64.zip"},
+		{Version: "8.4.4", Label: "8.4.4 (LTS)", URL: "https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.4-winx64.zip"},
+		{Version: "8.0.41", Label: "8.0.41", URL: "https://cdn.mysql.com/Downloads/MySQL-8.0/mysql-8.0.41-winx64.zip"},
+	}
 }
 
 const maxMySQLVersions = 5
@@ -30,14 +48,14 @@ func (m *MySQLManager) DisplayName() string { return "MySQL" }
 func (m *MySQLManager) DefaultPort() int    { return 3306 }
 
 func (m *MySQLManager) IsInstalled() bool {
-	_, err := os.Stat(filepath.Join(m.binDir(), "mysqld.exe"))
+	_, err := os.Stat(filepath.Join(m.binDir(), platform.BinaryName("mysqld")))
 	return err == nil
 }
 
 func (m *MySQLManager) ListVersions() ([]AvailableVersion, error) {
 	versions, err := m.scrapeVersions()
 	if err != nil || len(versions) == 0 {
-		return mysqlKnownVersions, nil
+		return mysqlKnownVersionsList(), nil
 	}
 	// Limit to last 5 versions
 	if len(versions) > maxMySQLVersions {
@@ -58,7 +76,16 @@ func (m *MySQLManager) Install(version string, port int, progress chan<- Progres
 		return err
 	}
 
-	filename := fmt.Sprintf("mysql-%s-winx64.zip", version)
+	var filename string
+	if goruntime.GOOS == "darwin" {
+		arch := "arm64"
+		if goruntime.GOARCH == "amd64" {
+			arch = "x86_64"
+		}
+		filename = fmt.Sprintf("mysql-%s-macos14-%s.tar.gz", version, arch)
+	} else {
+		filename = fmt.Sprintf("mysql-%s-winx64.zip", version)
+	}
 	tmpFile, err := downloadToTmp(downloadURL, filename, progress)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
@@ -73,11 +100,11 @@ func (m *MySQLManager) Install(version string, port int, progress chan<- Progres
 	os.RemoveAll(tmpExtract)
 	defer os.RemoveAll(tmpExtract)
 
-	if err := extractZip(tmpFile, tmpExtract); err != nil {
+	if err := extractArchive(tmpFile, tmpExtract); err != nil {
 		return fmt.Errorf("extraction failed: %w", err)
 	}
 
-	// MySQL zip has "mysql-VERSION-winx64/" top-level directory
+	// MySQL archive has "mysql-VERSION-*/" top-level directory
 	entries, _ := os.ReadDir(tmpExtract)
 	extractedDir := ""
 	for _, e := range entries {
@@ -91,8 +118,8 @@ func (m *MySQLManager) Install(version string, port int, progress chan<- Progres
 	}
 
 	// Verify critical binary exists
-	if _, err := os.Stat(filepath.Join(extractedDir, "bin", "mysqld.exe")); os.IsNotExist(err) {
-		return fmt.Errorf("mysqld.exe not found in extracted files - download may be corrupt")
+	if _, err := os.Stat(filepath.Join(extractedDir, "bin", platform.BinaryName("mysqld"))); os.IsNotExist(err) {
+		return fmt.Errorf("mysqld binary not found in extracted files - download may be corrupt")
 	}
 
 	if err := removeBaseDir(base); err != nil {
@@ -147,11 +174,11 @@ func (m *MySQLManager) Start() error {
 	}
 
 	base := serviceBaseDir("mysql")
-	mysqld := filepath.Join(m.binDir(), "mysqld.exe")
+	mysqld := filepath.Join(m.binDir(), platform.BinaryName("mysqld"))
 	logFile := filepath.Join(base, "logs", "mysql-start.log")
 
 	_, err := StartProcess("mysql", mysqld, []string{
-		fmt.Sprintf("--defaults-file=%s", filepath.Join(base, "my.ini")),
+		fmt.Sprintf("--defaults-file=%s", filepath.Join(base, MysqlConfigName())),
 	}, base, logFile)
 	return err
 }
@@ -161,7 +188,7 @@ func (m *MySQLManager) Stop() error {
 		return nil
 	}
 
-	mysqladmin := filepath.Join(m.binDir(), "mysqladmin.exe")
+	mysqladmin := filepath.Join(m.binDir(), platform.BinaryName("mysqladmin"))
 	if _, err := os.Stat(mysqladmin); err == nil {
 		runCommandSilent(mysqladmin, []string{"-u", "root", "shutdown"}, serviceBaseDir("mysql"))
 	}
@@ -234,7 +261,7 @@ func (m *MySQLManager) binDir() string {
 
 func (m *MySQLManager) writeConfig(port int) {
 	base := serviceBaseDir("mysql")
-	confPath := filepath.Join(base, "my.ini")
+	confPath := filepath.Join(base, MysqlConfigName())
 	basePath := strings.ReplaceAll(base, "\\", "/")
 
 	conf := fmt.Sprintf(`[mysqld]
@@ -255,9 +282,9 @@ default-character-set=utf8mb4
 }
 
 func (m *MySQLManager) initialize() error {
-	mysqld := filepath.Join(m.binDir(), "mysqld.exe")
+	mysqld := filepath.Join(m.binDir(), platform.BinaryName("mysqld"))
 	base := serviceBaseDir("mysql")
-	iniPath := filepath.Join(base, "my.ini")
+	iniPath := filepath.Join(base, MysqlConfigName())
 
 	out, err := runCommand(mysqld, []string{
 		fmt.Sprintf("--defaults-file=%s", iniPath),
@@ -272,7 +299,7 @@ func (m *MySQLManager) initialize() error {
 }
 
 func (m *MySQLManager) findDownloadURL(version string) (string, error) {
-	for _, v := range mysqlKnownVersions {
+	for _, v := range mysqlKnownVersionsList() {
 		if v.Version == version {
 			return v.URL, nil
 		}
@@ -282,6 +309,14 @@ func (m *MySQLManager) findDownloadURL(version string) (string, error) {
 	parts := strings.Split(version, ".")
 	if len(parts) >= 2 {
 		majorMinor := parts[0] + "." + parts[1]
+		if goruntime.GOOS == "darwin" {
+			arch := "arm64"
+			if goruntime.GOARCH == "amd64" {
+				arch = "x86_64"
+			}
+			url := fmt.Sprintf("https://cdn.mysql.com/Downloads/MySQL-%s/mysql-%s-macos14-%s.tar.gz", majorMinor, version, arch)
+			return url, nil
+		}
 		url := fmt.Sprintf("https://cdn.mysql.com/Downloads/MySQL-%s/mysql-%s-winx64.zip", majorMinor, version)
 		return url, nil
 	}
@@ -290,6 +325,11 @@ func (m *MySQLManager) findDownloadURL(version string) (string, error) {
 }
 
 func (m *MySQLManager) scrapeVersions() ([]AvailableVersion, error) {
+	// On macOS, skip scraping (the page lists Windows binaries) and use known versions
+	if goruntime.GOOS == "darwin" {
+		return mysqlKnownVersionsList(), nil
+	}
+
 	resp, err := http.Get("https://dev.mysql.com/downloads/mysql/")
 	if err != nil {
 		return nil, err

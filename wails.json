@@ -9,5 +9,12 @@
   "author": {
     "name": "Harun Geçit",
     "email": "harungecit@gmail.com"
+  },
+  "info": {
+    "companyName": "Harun Geçit",
+    "productName": "DevBox",
+    "productVersion": "0.2.0",
+    "copyright": "Copyright © 2026 Harun Geçit",
+    "comments": "Local development environment manager"
   }
 }

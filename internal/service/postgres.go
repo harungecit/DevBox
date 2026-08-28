@@ -4,16 +4,27 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
+
+	"DevBox/internal/platform"
 )
 
-// Known EDB download URLs - one per major version (15-18)
-var pgKnownVersions = []AvailableVersion{
-	{Version: "18.2", Label: "PostgreSQL 18 (18.2)", URL: "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260010"},
-	{Version: "17.8", Label: "PostgreSQL 17 (17.8)", URL: "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260006"},
-	{Version: "16.12", Label: "PostgreSQL 16 (16.12)", URL: "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260005"},
-	{Version: "15.16", Label: "PostgreSQL 15 (15.16)", URL: "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260002"},
+// pgKnownVersionsList returns platform-appropriate PostgreSQL download URLs
+func pgKnownVersionsList() []AvailableVersion {
+	if goruntime.GOOS == "darwin" {
+		return []AvailableVersion{
+			{Version: "17.8", Label: "PostgreSQL 17 (17.8)", URL: "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260008"},
+			{Version: "16.12", Label: "PostgreSQL 16 (16.12)", URL: "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260007"},
+		}
+	}
+	return []AvailableVersion{
+		{Version: "18.2", Label: "PostgreSQL 18 (18.2)", URL: "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260010"},
+		{Version: "17.8", Label: "PostgreSQL 17 (17.8)", URL: "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260006"},
+		{Version: "16.12", Label: "PostgreSQL 16 (16.12)", URL: "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260005"},
+		{Version: "15.16", Label: "PostgreSQL 15 (15.16)", URL: "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260002"},
+	}
 }
 
 type PostgresManager struct{}
@@ -25,13 +36,13 @@ func (p *PostgresManager) DisplayName() string { return "PostgreSQL" }
 func (p *PostgresManager) DefaultPort() int    { return 5432 }
 
 func (p *PostgresManager) IsInstalled() bool {
-	_, err := os.Stat(filepath.Join(p.binDir(), "pg_ctl.exe"))
+	_, err := os.Stat(filepath.Join(p.binDir(), platform.BinaryName("pg_ctl")))
 	return err == nil
 }
 
 func (p *PostgresManager) ListVersions() ([]AvailableVersion, error) {
 	// Use known versions only - EDB page scraper is unreliable
-	return pgKnownVersions, nil
+	return pgKnownVersionsList(), nil
 }
 
 func (p *PostgresManager) Install(version string, port int, progress chan<- Progress) error {
@@ -46,7 +57,12 @@ func (p *PostgresManager) Install(version string, port int, progress chan<- Prog
 		return err
 	}
 
-	filename := fmt.Sprintf("postgresql-%s-windows-x64-binaries.zip", version)
+	var filename string
+	if goruntime.GOOS == "darwin" {
+		filename = fmt.Sprintf("postgresql-%s-osx-binaries.tar.gz", version)
+	} else {
+		filename = fmt.Sprintf("postgresql-%s-windows-x64-binaries.zip", version)
+	}
 	tmpFile, err := downloadToTmp(downloadURL, filename, progress)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
@@ -61,11 +77,11 @@ func (p *PostgresManager) Install(version string, port int, progress chan<- Prog
 	os.RemoveAll(tmpExtract)
 	defer os.RemoveAll(tmpExtract)
 
-	if err := extractZip(tmpFile, tmpExtract); err != nil {
+	if err := extractArchive(tmpFile, tmpExtract); err != nil {
 		return fmt.Errorf("extraction failed: %w", err)
 	}
 
-	// EDB zip has "pgsql/" top-level directory
+	// EDB archive has "pgsql/" top-level directory
 	extractedDir := filepath.Join(tmpExtract, "pgsql")
 	if _, err := os.Stat(extractedDir); os.IsNotExist(err) {
 		entries, _ := os.ReadDir(tmpExtract)
@@ -82,8 +98,8 @@ func (p *PostgresManager) Install(version string, port int, progress chan<- Prog
 	}
 
 	// Verify critical binary exists
-	if _, err := os.Stat(filepath.Join(extractedDir, "bin", "pg_ctl.exe")); os.IsNotExist(err) {
-		return fmt.Errorf("pg_ctl.exe not found in extracted files - download may be corrupt")
+	if _, err := os.Stat(filepath.Join(extractedDir, "bin", platform.BinaryName("pg_ctl"))); os.IsNotExist(err) {
+		return fmt.Errorf("pg_ctl binary not found in extracted files - download may be corrupt")
 	}
 
 	if err := removeBaseDir(base); err != nil {
@@ -143,7 +159,7 @@ func (p *PostgresManager) Start() error {
 	}
 
 	base := serviceBaseDir("postgres")
-	postgresExe := filepath.Join(p.binDir(), "postgres.exe")
+	postgresExe := filepath.Join(p.binDir(), platform.BinaryName("postgres"))
 	dataDir := filepath.Join(base, "data")
 	logFile := filepath.Join(base, "logs", "postgresql.log")
 
@@ -260,7 +276,7 @@ func (p *PostgresManager) binDir() string {
 }
 
 func (p *PostgresManager) initDB(dataDir string, port int) error {
-	initdb := filepath.Join(p.binDir(), "initdb.exe")
+	initdb := filepath.Join(p.binDir(), platform.BinaryName("initdb"))
 	if _, err := os.Stat(initdb); os.IsNotExist(err) {
 		return fmt.Errorf("initdb not found at %s", initdb)
 	}
@@ -308,7 +324,7 @@ func (p *PostgresManager) adoptExistingProcess() bool {
 		return false
 	}
 
-	if !isProcessRunning(pid) {
+	if !platform.IsProcessRunning(pid) {
 		// Stale postmaster.pid — postgres crashed or was killed externally
 		os.Remove(postmasterPid)
 		return false
@@ -321,7 +337,7 @@ func (p *PostgresManager) adoptExistingProcess() bool {
 }
 
 func (p *PostgresManager) findDownloadURL(version string) (string, error) {
-	for _, v := range pgKnownVersions {
+	for _, v := range pgKnownVersionsList() {
 		if v.Version == version {
 			return v.URL, nil
 		}

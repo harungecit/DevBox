@@ -4,14 +4,29 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
+
+	"DevBox/internal/platform"
 )
 
 const mailpitMaxVersions = 5
 
-var mailpitKnownVersions = []AvailableVersion{
-	{Version: "1.22.3", Label: "1.22.3 (Latest)", URL: "https://github.com/axllent/mailpit/releases/download/v1.22.3/mailpit-windows-amd64.zip"},
-	{Version: "1.21.7", Label: "1.21.7", URL: "https://github.com/axllent/mailpit/releases/download/v1.21.7/mailpit-windows-amd64.zip"},
+func mailpitKnownVersionsList() []AvailableVersion {
+	if goruntime.GOOS == "darwin" {
+		arch := "arm64"
+		if goruntime.GOARCH == "amd64" {
+			arch = "amd64"
+		}
+		return []AvailableVersion{
+			{Version: "1.22.3", Label: "1.22.3 (Latest)", URL: fmt.Sprintf("https://github.com/axllent/mailpit/releases/download/v1.22.3/mailpit-darwin-%s.tar.gz", arch)},
+			{Version: "1.21.7", Label: "1.21.7", URL: fmt.Sprintf("https://github.com/axllent/mailpit/releases/download/v1.21.7/mailpit-darwin-%s.tar.gz", arch)},
+		}
+	}
+	return []AvailableVersion{
+		{Version: "1.22.3", Label: "1.22.3 (Latest)", URL: "https://github.com/axllent/mailpit/releases/download/v1.22.3/mailpit-windows-amd64.zip"},
+		{Version: "1.21.7", Label: "1.21.7", URL: "https://github.com/axllent/mailpit/releases/download/v1.21.7/mailpit-windows-amd64.zip"},
+	}
 }
 
 type MailpitManager struct{}
@@ -23,14 +38,14 @@ func (mp *MailpitManager) DisplayName() string  { return "Mailpit" }
 func (mp *MailpitManager) DefaultPort() int     { return 1025 }
 
 func (mp *MailpitManager) IsInstalled() bool {
-	_, err := os.Stat(filepath.Join(serviceBaseDir("mailpit"), "mailpit.exe"))
+	_, err := os.Stat(filepath.Join(serviceBaseDir("mailpit"), platform.BinaryName("mailpit")))
 	return err == nil
 }
 
 func (mp *MailpitManager) ListVersions() ([]AvailableVersion, error) {
 	versions, err := mp.fetchVersions()
 	if err != nil || len(versions) == 0 {
-		return mailpitKnownVersions, nil
+		return mailpitKnownVersionsList(), nil
 	}
 	if len(versions) > mailpitMaxVersions {
 		versions = versions[:mailpitMaxVersions]
@@ -50,7 +65,16 @@ func (mp *MailpitManager) Install(version string, port int, progress chan<- Prog
 		return err
 	}
 
-	filename := fmt.Sprintf("mailpit-%s-windows-amd64.zip", version)
+	var filename string
+	if goruntime.GOOS == "darwin" {
+		arch := "arm64"
+		if goruntime.GOARCH == "amd64" {
+			arch = "amd64"
+		}
+		filename = fmt.Sprintf("mailpit-%s-darwin-%s.tar.gz", version, arch)
+	} else {
+		filename = fmt.Sprintf("mailpit-%s-windows-amd64.zip", version)
+	}
 	tmpFile, err := downloadToTmp(downloadURL, filename, progress)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
@@ -65,20 +89,20 @@ func (mp *MailpitManager) Install(version string, port int, progress chan<- Prog
 	os.RemoveAll(tmpExtract)
 	defer os.RemoveAll(tmpExtract)
 
-	if err := extractZip(tmpFile, tmpExtract); err != nil {
+	if err := extractArchive(tmpFile, tmpExtract); err != nil {
 		return fmt.Errorf("extraction failed: %w", err)
 	}
 
-	// Mailpit zip contains just mailpit.exe (no subdirectory)
+	// Mailpit archive contains just mailpit binary (no subdirectory)
 	// Check both root and any subdirectory
-	exePath := filepath.Join(tmpExtract, "mailpit.exe")
+	exePath := filepath.Join(tmpExtract, platform.BinaryName("mailpit"))
 	if _, err := os.Stat(exePath); os.IsNotExist(err) {
 		// Look in subdirectories
 		entries, _ := os.ReadDir(tmpExtract)
 		found := false
 		for _, e := range entries {
 			if e.IsDir() {
-				candidate := filepath.Join(tmpExtract, e.Name(), "mailpit.exe")
+				candidate := filepath.Join(tmpExtract, e.Name(), platform.BinaryName("mailpit"))
 				if _, err := os.Stat(candidate); err == nil {
 					tmpExtract = filepath.Join(tmpExtract, e.Name())
 					found = true
@@ -87,7 +111,7 @@ func (mp *MailpitManager) Install(version string, port int, progress chan<- Prog
 			}
 		}
 		if !found {
-			return fmt.Errorf("mailpit.exe not found in extracted files")
+			return fmt.Errorf("mailpit binary not found in extracted files")
 		}
 	}
 
@@ -142,7 +166,7 @@ func (mp *MailpitManager) Start() error {
 	}
 
 	base := serviceBaseDir("mailpit")
-	exe := filepath.Join(base, "mailpit.exe")
+	exe := filepath.Join(base, platform.BinaryName("mailpit"))
 	logFile := filepath.Join(base, "logs", "mailpit.log")
 	uiPort := mp.uiPort(port)
 
@@ -222,7 +246,7 @@ func (mp *MailpitManager) uiPort(smtpPort int) int {
 }
 
 func (mp *MailpitManager) findDownloadURL(version string) (string, error) {
-	for _, v := range mailpitKnownVersions {
+	for _, v := range mailpitKnownVersionsList() {
 		if v.Version == version {
 			return v.URL, nil
 		}
@@ -237,6 +261,13 @@ func (mp *MailpitManager) findDownloadURL(version string) (string, error) {
 		}
 	}
 	// Construct URL as fallback
+	if goruntime.GOOS == "darwin" {
+		arch := "arm64"
+		if goruntime.GOARCH == "amd64" {
+			arch = "amd64"
+		}
+		return fmt.Sprintf("https://github.com/axllent/mailpit/releases/download/v%s/mailpit-darwin-%s.tar.gz", version, arch), nil
+	}
 	return fmt.Sprintf("https://github.com/axllent/mailpit/releases/download/v%s/mailpit-windows-amd64.zip", version), nil
 }
 
@@ -246,11 +277,22 @@ func (mp *MailpitManager) fetchVersions() ([]AvailableVersion, error) {
 		return nil, err
 	}
 
+	var wantAsset string
+	if goruntime.GOOS == "darwin" {
+		arch := "arm64"
+		if goruntime.GOARCH == "amd64" {
+			arch = "amd64"
+		}
+		wantAsset = fmt.Sprintf("mailpit-darwin-%s.tar.gz", arch)
+	} else {
+		wantAsset = "mailpit-windows-amd64.zip"
+	}
+
 	var versions []AvailableVersion
 	for _, rel := range releases {
 		tag := strings.TrimPrefix(rel.TagName, "v")
 		for _, asset := range rel.Assets {
-			if asset.Name == "mailpit-windows-amd64.zip" {
+			if asset.Name == wantAsset {
 				label := tag
 				if len(versions) == 0 {
 					label = tag + " (Latest)"

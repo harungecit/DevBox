@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import { t } from '../lib/i18n/index';
   import { serviceLogos, runtimeLogos } from '../lib/logos';
+  import AppIcon from '../lib/components/AppIcon.svelte';
+  import { appConfig } from '../lib/stores/app';
   import { GetPATHEntries, AddToPATH, RemoveFromPATH } from '../../wailsjs/go/main/App';
 
   let pathEntries: string[] = [];
@@ -9,10 +11,17 @@
   let loading: boolean = true;
   let errorMessage: string = '';
 
-  const devboxPattern = /\.devbox/i;
+  // An entry is "managed" when it lives inside the DevBox data dir (current
+  // location, or the legacy ~/.devbox one).
+  function isManaged(entry: string): boolean {
+    const norm = entry.replace(/\//g, '\\').toLowerCase();
+    const dataDir = ($appConfig.dataDir || '').replace(/\//g, '\\').toLowerCase();
+    if (dataDir && norm.startsWith(dataDir)) return true;
+    return /[\\\/]\.devbox[\\\/]/i.test(entry);
+  }
 
-  $: managedEntries = pathEntries.filter(e => devboxPattern.test(e));
-  $: systemEntries = pathEntries.filter(e => !devboxPattern.test(e));
+  $: managedEntries = pathEntries.filter(isManaged);
+  $: systemEntries = pathEntries.filter(e => !isManaged(e));
 
   async function loadPATH() {
     loading = true;
@@ -47,40 +56,39 @@
     }
   }
 
-  function getRuntimeLabel(path: string): string {
-    const p = path.toLowerCase();
-    if (p.includes('go')) return 'Go';
-    if (p.includes('node')) return 'Node.js';
-    if (p.includes('php')) return 'PHP';
-    if (p.includes('python')) return 'Python';
-    if (p.includes('rust')) return 'Rust';
-    if (p.includes('nginx')) return 'Nginx';
-    if (p.includes('postgres')) return 'PostgreSQL';
-    if (p.includes('mysql')) return 'MySQL';
-    if (p.includes('mariadb')) return 'MariaDB';
-    if (p.includes('mongodb')) return 'MongoDB';
-    if (p.includes('redis')) return 'Redis';
-    if (p.includes('valkey')) return 'Valkey';
-    if (p.includes('mailpit')) return 'Mailpit';
-    return 'DevBox';
-  }
+  // Identify what an entry belongs to from its path segments, e.g.
+  //   <data>\runtimes\node\24.1.0  → node
+  //   <data>\services\postgres\bin → postgres
+  //   <data>\tools\bun             → bun
+  interface EntryKind { label: string; icon: string; version: string }
 
-  function getIcon(path: string): string {
-    const p = path.toLowerCase();
-    if (p.includes('go')) return runtimeLogos.go;
-    if (p.includes('node')) return runtimeLogos.node;
-    if (p.includes('php')) return runtimeLogos.php;
-    if (p.includes('python')) return runtimeLogos.python;
-    if (p.includes('rust')) return runtimeLogos.rust;
-    if (p.includes('nginx')) return serviceLogos.nginx;
-    if (p.includes('postgres')) return serviceLogos.postgres;
-    if (p.includes('mysql')) return serviceLogos.mysql;
-    if (p.includes('mariadb')) return serviceLogos.mariadb;
-    if (p.includes('mongodb')) return serviceLogos.mongodb;
-    if (p.includes('redis')) return serviceLogos.redis;
-    if (p.includes('valkey')) return serviceLogos.valkey;
-    if (p.includes('mailpit')) return serviceLogos.mailpit;
-    return '';
+  const runtimeLabels: Record<string, string> = { go: 'Go', node: 'Node.js', php: 'PHP', python: 'Python', rust: 'Rust' };
+  const serviceLabels: Record<string, string> = {
+    nginx: 'Nginx', apache: 'Apache', caddy: 'Caddy', frankenphp: 'FrankenPHP', postgres: 'PostgreSQL',
+    mysql: 'MySQL', mariadb: 'MariaDB', mongodb: 'MongoDB', redis: 'Redis', valkey: 'Valkey', mailpit: 'Mailpit',
+  };
+  const toolLabels: Record<string, string> = { bun: 'Bun', mkcert: 'mkcert', cloudflared: 'cloudflared', composer: 'Composer' };
+
+  function classify(entry: string): EntryKind {
+    const parts = entry.split(/[\\/]/).filter(Boolean).map(p => p.toLowerCase());
+    const at = (name: string) => parts.indexOf(name);
+
+    const r = at('runtimes');
+    if (r >= 0 && parts[r + 1] && runtimeLabels[parts[r + 1]]) {
+      const id = parts[r + 1];
+      return { label: runtimeLabels[id], icon: runtimeLogos[id] || '', version: parts[r + 2] || '' };
+    }
+    const s = at('services');
+    if (s >= 0 && parts[s + 1] && serviceLabels[parts[s + 1]]) {
+      const id = parts[s + 1];
+      return { label: serviceLabels[id], icon: serviceLogos[id] || '', version: '' };
+    }
+    const tl = at('tools');
+    if (tl >= 0 && parts[tl + 1]) {
+      const id = parts[tl + 1];
+      return { label: toolLabels[id] || id, icon: '', version: '' };
+    }
+    return { label: 'DevBox', icon: '', version: '' };
   }
 
   onMount(loadPATH);
@@ -125,13 +133,21 @@
     {#if managedEntries.length > 0}
       <div class="space-y-2">
         {#each managedEntries as entry}
+          {@const kind = classify(entry)}
           <div class="flex items-center justify-between p-3 rounded-xl border border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all group">
             <div class="flex items-center gap-4 flex-1 min-w-0">
-              <div class="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 shadow-sm bg-white dark:bg-slate-700 p-1">
-                {@html getIcon(entry) || ''}
+              <div class="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 shadow-sm bg-white dark:bg-slate-700 p-1 flex items-center justify-center">
+                {#if kind.icon}
+                  {@html kind.icon}
+                {:else}
+                  <AppIcon size="w-6 h-6" />
+                {/if}
               </div>
               <div class="truncate">
-                <p class="text-xs font-bold text-[var(--color-text)]">{getRuntimeLabel(entry)}</p>
+                <p class="text-xs font-bold text-[var(--color-text)] flex items-center gap-1.5">
+                  {kind.label}
+                  {#if kind.version}<span class="font-mono font-medium text-[10px] text-primary-500">{kind.version}</span>{/if}
+                </p>
                 <p class="font-mono text-[10px] text-slate-500 truncate">{entry}</p>
               </div>
             </div>

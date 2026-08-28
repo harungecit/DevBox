@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"sync"
 
 	"DevBox/internal/config"
@@ -47,6 +48,10 @@ type ServiceInfo struct {
 	Port        int           `json:"port"`
 	Version     string        `json:"version"`
 	Installed   bool          `json:"installed"`
+	// UpdateVersion is a newer release installable in place (data kept); "" if none.
+	UpdateVersion string `json:"updateVersion"`
+	// LatestMajor is a newer release line that needs a fresh install; "" if none.
+	LatestMajor string `json:"latestMajor"`
 }
 
 // ServiceManager defines the interface for managing services
@@ -82,6 +87,9 @@ func Register(sm ServiceManager) {
 
 // ConflictGroups maps service names to their mutual exclusion group.
 // Only one service per group can be installed at a time.
+// Note: FrankenPHP intentionally is NOT in "webserver" — it bundles its own
+// webserver and PHP runtime, and is selected per-project rather than globally,
+// so it can coexist with nginx/apache/caddy as long as ports differ.
 var ConflictGroups = map[string]string{
 	"nginx":   "webserver",
 	"apache":  "webserver",
@@ -115,6 +123,7 @@ func InitAll() {
 	Register(NewNginxManager())
 	Register(NewApacheManager())
 	Register(NewCaddyManager())
+	Register(NewFrankenPHPManager())
 	// Databases
 	Register(NewPostgresManager())
 	Register(NewMySQLManager())
@@ -122,7 +131,11 @@ func InitAll() {
 	Register(NewMongoDBManager())
 	// Cache
 	Register(NewRedisManager())
-	Register(NewValkeyManager())
+	// Valkey has no official or maintained community Windows build — skip on Windows.
+	// Redis is API-compatible and registered above as the Windows alternative.
+	if goruntime.GOOS != "windows" {
+		Register(NewValkeyManager())
+	}
 	// Mail
 	Register(NewMailpitManager())
 }
@@ -145,7 +158,13 @@ func GetAll() map[string]ServiceInfo {
 
 	result := make(map[string]ServiceInfo)
 	for name, mgr := range Registry {
-		result[name] = mgr.Info()
+		info := mgr.Info()
+		if info.Installed {
+			u := CheckUpdate(name)
+			info.UpdateVersion = u.Latest
+			info.LatestMajor = u.LatestMajor
+		}
+		result[name] = info
 	}
 	return result
 }

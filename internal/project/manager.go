@@ -2,8 +2,10 @@ package project
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"DevBox/internal/config"
@@ -14,10 +16,76 @@ type Project struct {
 	Name         string `json:"name"`
 	Path         string `json:"path"`
 	Domain       string `json:"domain"`       // e.g., "my-app.test"
-	Framework    string `json:"framework"`     // e.g., "Laravel", "Next.js", "Go"
+	Framework    string `json:"framework"`    // e.g., "Laravel", "Next.js", "Go"
 	SSL          bool   `json:"ssl"`
 	Port         int    `json:"port"`         // app dev server port (0 = served by web server for PHP/Static)
 	StartCommand string `json:"startCommand"` // custom start command (empty = auto-detect)
+
+	// Runtime is the language/category the project is built on. Independent of
+	// Framework so it survives framework misdetection. Derived from Framework if
+	// empty during ListProjects (backward-compat migration for older entries).
+	// Values: "php" | "node" | "go" | "python" | "rust" | "static".
+	Runtime string `json:"runtime,omitempty"`
+
+	// RuntimeVersion pins the project to a specific runtime version. Empty means
+	// "use the globally active runtime version" (current default behavior).
+	RuntimeVersion string `json:"runtimeVersion,omitempty"`
+
+	// Webserver selects how the front-door routes this project. Empty means
+	// "auto" — derived from Runtime: php → primary installed web server,
+	// node/go/python/rust → "devserver" (the project's own dev server),
+	// static → primary web server (file server).
+	// Explicit values: "nginx" | "caddy" | "apache" | "frankenphp" | "devserver".
+	Webserver string `json:"webserver,omitempty"`
+
+	// PublicHostname is the hostname on the user's own Cloudflare zone that a
+	// named tunnel exposes this project at (e.g. "myapp.example.com"). Empty
+	// means "share via a random *.trycloudflare.com quick tunnel".
+	PublicHostname string `json:"publicHostname,omitempty"`
+}
+
+// RuntimeFromFramework maps a detected framework name to the underlying runtime.
+// Returns "" for unrecognized frameworks.
+func RuntimeFromFramework(framework string) string {
+	switch framework {
+	case "Laravel", "WordPress", "Symfony", "PHP":
+		return "php"
+	case "Next.js", "Nuxt", "Vue", "React", "Svelte", "Angular":
+		return "node"
+	case "Django", "Python":
+		return "python"
+	case "Go":
+		return "go"
+	case "Rust":
+		return "rust"
+	case "Static":
+		return "static"
+	}
+	return ""
+}
+
+// DefaultWebserverForRuntime returns the resolved webserver choice when a project's
+// Webserver field is empty ("auto"). PHP/Static get served by a real web server;
+// app-server runtimes use their own dev server.
+func DefaultWebserverForRuntime(rt string) string {
+	switch rt {
+	case "php", "static":
+		return "auto" // resolved later against installed webservers (nginx/caddy/apache)
+	case "node", "go", "python", "rust":
+		return "devserver"
+	}
+	return "auto"
+}
+
+// fillDefaults populates derived fields (Runtime, Webserver) for a project that
+// was saved before these fields existed. Mutates in place.
+func (p *Project) fillDefaults() {
+	if p.Runtime == "" {
+		p.Runtime = RuntimeFromFramework(p.Framework)
+	}
+	if p.Webserver == "" {
+		p.Webserver = DefaultWebserverForRuntime(p.Runtime)
+	}
 }
 
 // IsAppServer returns true if the framework runs its own HTTP server (Node, Python, Go, Rust etc.)
@@ -55,7 +123,9 @@ func projectsFilePath() string {
 	return filepath.Join(config.GetDataDir(), "projects.json")
 }
 
-// ListProjects reads all projects from projects.json
+// ListProjects reads all projects from projects.json. Missing Runtime/Webserver
+// fields on legacy entries are filled in-memory so callers always see a
+// fully-populated Project.
 func ListProjects() ([]Project, error) {
 	data, err := os.ReadFile(projectsFilePath())
 	if err != nil {
@@ -68,6 +138,9 @@ func ListProjects() ([]Project, error) {
 	var projects []Project
 	if err := json.Unmarshal(data, &projects); err != nil {
 		return nil, err
+	}
+	for i := range projects {
+		projects[i].fillDefaults()
 	}
 	return projects, nil
 }
@@ -95,6 +168,7 @@ func AddProject(projectPath, domain string) (*Project, error) {
 	}
 
 	framework := DetectFramework(projectPath)
+	rt := RuntimeFromFramework(framework)
 
 	project := Project{
 		Name:      name,
@@ -103,6 +177,8 @@ func AddProject(projectPath, domain string) (*Project, error) {
 		Framework: framework,
 		SSL:       false,
 		Port:      DefaultPort(framework),
+		Runtime:   rt,
+		Webserver: DefaultWebserverForRuntime(rt),
 	}
 
 	projects, err := ListProjects()
@@ -249,6 +325,92 @@ func SetProjectSSL(name string, ssl bool) error {
 	for i, p := range projects {
 		if p.Name == name {
 			projects[i].SSL = ssl
+			return SaveProjects(projects)
+		}
+	}
+	return nil
+}
+
+// validRuntimes / validWebservers gate the public setters so the persisted
+// values stay within the known vocabulary the rest of DevBox expects.
+var validRuntimes = map[string]bool{
+	"php": true, "node": true, "go": true, "python": true, "rust": true, "static": true,
+}
+var validWebservers = map[string]bool{
+	"auto": true, "nginx": true, "caddy": true, "apache": true, "frankenphp": true, "devserver": true,
+}
+
+// SetProjectRuntime overrides a project's runtime. Empty string resets to
+// auto-derived-from-Framework behavior.
+func SetProjectRuntime(name, rt string) error {
+	if rt != "" && !validRuntimes[rt] {
+		return fmt.Errorf("invalid runtime %q", rt)
+	}
+	projects, err := ListProjects()
+	if err != nil {
+		return err
+	}
+	for i, p := range projects {
+		if p.Name == name {
+			projects[i].Runtime = rt
+			// Reset webserver to "auto" if the runtime changed — the previous
+			// choice may no longer be sensible (e.g. nginx for a Go runtime).
+			projects[i].Webserver = ""
+			return SaveProjects(projects)
+		}
+	}
+	return nil
+}
+
+// SetProjectRuntimeVersion pins a project to a specific runtime version, or
+// clears the pin (empty string = use global active version).
+func SetProjectRuntimeVersion(name, version string) error {
+	projects, err := ListProjects()
+	if err != nil {
+		return err
+	}
+	for i, p := range projects {
+		if p.Name == name {
+			projects[i].RuntimeVersion = version
+			return SaveProjects(projects)
+		}
+	}
+	return nil
+}
+
+// SetProjectPublicHostname sets (or clears) the custom tunnel hostname.
+func SetProjectPublicHostname(name, hostname string) error {
+	hostname = strings.ToLower(strings.TrimSpace(hostname))
+	if hostname != "" {
+		if matched, _ := regexp.MatchString(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`, hostname); !matched {
+			return fmt.Errorf("invalid hostname %q", hostname)
+		}
+	}
+	projects, err := ListProjects()
+	if err != nil {
+		return err
+	}
+	for i, p := range projects {
+		if p.Name == name {
+			projects[i].PublicHostname = hostname
+			return SaveProjects(projects)
+		}
+	}
+	return fmt.Errorf("project not found: %s", name)
+}
+
+// SetProjectWebserver overrides a project's webserver choice. Empty = auto.
+func SetProjectWebserver(name, ws string) error {
+	if ws != "" && !validWebservers[ws] {
+		return fmt.Errorf("invalid webserver %q", ws)
+	}
+	projects, err := ListProjects()
+	if err != nil {
+		return err
+	}
+	for i, p := range projects {
+		if p.Name == name {
+			projects[i].Webserver = ws
 			return SaveProjects(projects)
 		}
 	}

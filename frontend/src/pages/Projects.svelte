@@ -26,6 +26,14 @@
     GetRunningDevServers,
     GetDevServerLogs,
     SetProjectStartCommand,
+    SetProjectRuntime,
+    SetProjectRuntimeVersion,
+    SetProjectWebserver,
+    SetProjectPublicHostname,
+    GetDefaultProjectsDir,
+    GetInstalledVersions,
+    GetAllServices,
+    GetProxyStatus,
     GetAvailableTemplates,
     ScaffoldNewProject,
     CloneGitProject,
@@ -41,6 +49,10 @@
     ssl: boolean;
     port: number;
     startCommand: string;
+    runtime?: string;        // php / node / go / python / rust / static
+    runtimeVersion?: string; // pinned version; empty = use global active
+    webserver?: string;      // auto / nginx / caddy / apache / frankenphp / devserver
+    publicHostname?: string; // custom-domain tunnel hostname (needs linked Cloudflare)
   }
 
   interface TemplateInfo {
@@ -91,6 +103,150 @@
   }
   let devServerStates: Record<string, DevServerState> = {};
 
+  // Per-project settings panel state
+  let expandedProject: string | null = null;
+  // Cache of installed versions per runtime so the version dropdown doesn't
+  // re-fetch each time the user toggles the panel.
+  let installedVersionsByRuntime: Record<string, { number: string }[]> = {};
+  // Set of installed managed-webserver names (nginx/caddy/apache/frankenphp),
+  // used to filter the Webserver dropdown to only options the user has ready.
+  let installedWebservers: Set<string> = new Set();
+  let savingProjectSettings: Record<string, boolean> = {};
+
+  const runtimeChoices = [
+    { id: '', label: 'Auto (from framework)' },
+    { id: 'php', label: 'PHP' },
+    { id: 'node', label: 'Node.js' },
+    { id: 'go', label: 'Go' },
+    { id: 'python', label: 'Python' },
+    { id: 'rust', label: 'Rust' },
+    { id: 'static', label: 'Static' },
+  ];
+
+  // webserverChoicesFor returns the list of allowed webservers given a runtime.
+  // App-server runtimes can only use their own dev server; PHP/Static can pick
+  // any installed managed webserver.
+  function webserverChoicesFor(rt: string): { id: string; label: string }[] {
+    const isAppServer = rt === 'node' || rt === 'go' || rt === 'python' || rt === 'rust';
+    if (isAppServer) {
+      return [{ id: 'devserver', label: 'Dev server (built-in)' }];
+    }
+    // PHP / Static / unknown — allow any managed webserver the user has installed.
+    const out: { id: string; label: string }[] = [
+      { id: '', label: 'Auto (use installed default)' },
+    ];
+    for (const ws of ['nginx', 'caddy', 'apache', 'frankenphp']) {
+      if (installedWebservers.has(ws)) {
+        out.push({ id: ws, label: ws.charAt(0).toUpperCase() + ws.slice(1) });
+      }
+    }
+    return out;
+  }
+
+  async function loadInstalledVersionsFor(runtime: string) {
+    if (!runtime || runtime === 'static' || installedVersionsByRuntime[runtime]) return;
+    try {
+      const list = await GetInstalledVersions(runtime);
+      installedVersionsByRuntime[runtime] = (list || []).map((v: any) => ({ number: v.number }));
+      installedVersionsByRuntime = installedVersionsByRuntime;
+    } catch {
+      installedVersionsByRuntime[runtime] = [];
+    }
+  }
+
+  async function loadInstalledWebservers() {
+    try {
+      const all = await GetAllServices();
+      const next = new Set<string>();
+      for (const [name, info] of Object.entries(all || {})) {
+        if ((info as any).installed) next.add(name);
+      }
+      installedWebservers = next;
+    } catch {
+      // non-fatal
+    }
+  }
+
+  async function toggleSettingsPanel(proj: ProjectInfo) {
+    if (expandedProject === proj.name) {
+      expandedProject = null;
+      return;
+    }
+    expandedProject = proj.name;
+    await loadInstalledWebservers();
+    if (proj.runtime) await loadInstalledVersionsFor(proj.runtime);
+  }
+
+  function selectValue(e: Event): string {
+    return (e.currentTarget as HTMLSelectElement).value;
+  }
+
+  function inputValue(e: Event): string {
+    return (e.currentTarget as HTMLInputElement).value;
+  }
+
+  function blurTarget(e: Event) {
+    (e.currentTarget as HTMLInputElement).blur();
+  }
+
+  async function changeRuntime(proj: ProjectInfo, rt: string) {
+    savingProjectSettings[proj.name] = true;
+    savingProjectSettings = savingProjectSettings;
+    try {
+      await SetProjectRuntime(proj.name, rt);
+      await loadProjects();
+      if (rt) await loadInstalledVersionsFor(rt);
+    } catch (e: any) {
+      errorMessage = `${proj.name}: ${e?.message || e}`;
+    }
+    savingProjectSettings[proj.name] = false;
+    savingProjectSettings = savingProjectSettings;
+  }
+
+  async function changeRuntimeVersion(proj: ProjectInfo, version: string) {
+    savingProjectSettings[proj.name] = true;
+    savingProjectSettings = savingProjectSettings;
+    try {
+      await SetProjectRuntimeVersion(proj.name, version);
+      await loadProjects();
+    } catch (e: any) {
+      errorMessage = `${proj.name}: ${e?.message || e}`;
+    }
+    savingProjectSettings[proj.name] = false;
+    savingProjectSettings = savingProjectSettings;
+  }
+
+  async function changeWebserver(proj: ProjectInfo, ws: string) {
+    savingProjectSettings[proj.name] = true;
+    savingProjectSettings = savingProjectSettings;
+    try {
+      await SetProjectWebserver(proj.name, ws);
+      await loadProjects();
+    } catch (e: any) {
+      errorMessage = `${proj.name}: ${e?.message || e}`;
+    }
+    savingProjectSettings[proj.name] = false;
+    savingProjectSettings = savingProjectSettings;
+  }
+
+  // Per-project public hostname edits (saved on blur / Enter)
+  let hostnameEdits: Record<string, string> = {};
+
+  async function savePublicHostname(proj: ProjectInfo) {
+    const value = (hostnameEdits[proj.name] ?? proj.publicHostname ?? '').trim();
+    if (value === (proj.publicHostname || '')) return;
+    savingProjectSettings[proj.name] = true;
+    savingProjectSettings = savingProjectSettings;
+    try {
+      await SetProjectPublicHostname(proj.name, value);
+      await loadProjects();
+    } catch (e: any) {
+      errorMessage = `${proj.name}: ${e?.message || e}`;
+    }
+    savingProjectSettings[proj.name] = false;
+    savingProjectSettings = savingProjectSettings;
+  }
+
   // Add dialog: port override for app-server projects
   let newPort = 0;
 
@@ -124,6 +280,11 @@
     cloneURL = '';
     cloneName = '';
     cloneParentFolder = '';
+    // Default new/cloned projects into <data>/projects; the user can still browse elsewhere.
+    GetDefaultProjectsDir().then(dir => {
+      if (!parentFolder) parentFolder = dir;
+      if (!cloneParentFolder) cloneParentFolder = dir;
+    }).catch(() => {});
     cloneDomain = '';
     progressPercent = -1;
     progressMessage = '';
@@ -418,11 +579,33 @@
   }
 
   async function startProjectTunnel(proj: ProjectInfo) {
-    const devPort = devServerStates[proj.name]?.port || proj.port;
-    const port = isAppServer(proj.framework) && devPort > 0
-      ? devPort
-      : (webServerPort || 80);
-    const ssl = isAppServer(proj.framework) ? false : proj.ssl;
+    // If the front-door proxy is running, route the tunnel through it so domain
+    // mapping is consistent: cloudflared connects to the proxy's port (80) with
+    // the project's Host header, and the proxy dispatches to the right backend.
+    // This is what keeps two parallel tunnels (e.g. backend.test + laraveltest.test)
+    // from collapsing onto the same backend default vhost.
+    let port: number;
+    let ssl: boolean;
+    try {
+      const ps = await GetProxyStatus();
+      if (ps?.running) {
+        port = ps.port;
+        ssl = false; // HTTPS termination through the proxy lands in phase 4
+      } else {
+        const devPort = devServerStates[proj.name]?.port || proj.port;
+        port = isAppServer(proj.framework) && devPort > 0
+          ? devPort
+          : (webServerPort || 80);
+        ssl = isAppServer(proj.framework) ? false : proj.ssl;
+      }
+    } catch {
+      // Defensive fallback to legacy behavior.
+      const devPort = devServerStates[proj.name]?.port || proj.port;
+      port = isAppServer(proj.framework) && devPort > 0
+        ? devPort
+        : (webServerPort || 80);
+      ssl = isAppServer(proj.framework) ? false : proj.ssl;
+    }
     tunnelStates[proj.name] = { running: false, url: '', starting: true };
     tunnelStates = { ...tunnelStates };
     errorMessage = '';
@@ -1145,6 +1328,17 @@
                   </button>
                 {/if}
 
+                <!-- Settings (runtime / version / webserver) -->
+                <button
+                  class="btn-icon bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
+                  class:bg-primary-500={expandedProject === proj.name}
+                  class:text-white={expandedProject === proj.name}
+                  on:click={() => toggleSettingsPanel(proj)}
+                  title={$t('projects.settings')}
+                >
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                </button>
+
                 <!-- Tunnel -->
                 {#if hasTunnel}
                   <button
@@ -1194,7 +1388,7 @@
             </div>
           {:else if hasTunnel && ts?.url}
             <div class="mt-3 pt-3 border-t border-[var(--color-border)] flex items-center gap-2">
-              <span class="text-[10px] font-bold px-1.5 py-0.5 rounded border bg-orange-500/10 text-orange-500 border-orange-500/20 uppercase flex-shrink-0">{$t('tunnel.publicUrl')}</span>
+              <span class="text-[10px] font-bold px-1.5 py-0.5 rounded border bg-orange-500/10 text-orange-500 border-orange-500/20 uppercase flex-shrink-0">{proj.publicHostname ? $t('tunnel.custom') : $t('tunnel.publicUrl')}</span>
               <button
                 class="text-xs font-mono text-orange-500 font-bold hover:underline cursor-pointer truncate"
                 on:click={() => copyTunnelURL(proj.name)}
@@ -1217,6 +1411,72 @@
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
               </button>
             </div>
+          {/if}
+
+          <!-- Settings panel (runtime / version / webserver) -->
+          {#if expandedProject === proj.name}
+            {@const wsChoices = webserverChoicesFor(proj.runtime || '')}
+            {@const versions = installedVersionsByRuntime[proj.runtime || ''] || []}
+            {@const currentRuntime = proj.runtime || ''}
+            {@const currentVersion = proj.runtimeVersion || ''}
+            {@const currentWebserver = proj.webserver || ''}
+            <div class="mt-3 pt-3 border-t border-[var(--color-border)] grid grid-cols-4 gap-3">
+              <div>
+                <label class="block text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-1.5">{$t('projects.runtime')}</label>
+                <select
+                  class="w-full px-2 py-1.5 text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]"
+                  on:change={(e) => changeRuntime(proj, selectValue(e))}
+                  disabled={savingProjectSettings[proj.name]}
+                >
+                  {#each runtimeChoices as rc}
+                    <option value={rc.id} selected={currentRuntime === rc.id}>{rc.label}</option>
+                  {/each}
+                </select>
+              </div>
+
+              <div>
+                <label class="block text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-1.5">{$t('projects.runtimeVersion')}</label>
+                <select
+                  class="w-full px-2 py-1.5 text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]"
+                  on:change={(e) => changeRuntimeVersion(proj, selectValue(e))}
+                  disabled={savingProjectSettings[proj.name] || !proj.runtime || proj.runtime === 'static'}
+                >
+                  <option value="" selected={currentVersion === ''}>{$t('projects.versionGlobalDefault')}</option>
+                  {#each versions as v}
+                    <option value={v.number} selected={currentVersion === v.number}>v{v.number}</option>
+                  {/each}
+                </select>
+              </div>
+
+              <div>
+                <label class="block text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-1.5">{$t('projects.webserver')}</label>
+                <select
+                  class="w-full px-2 py-1.5 text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]"
+                  on:change={(e) => changeWebserver(proj, selectValue(e))}
+                  disabled={savingProjectSettings[proj.name]}
+                >
+                  {#each wsChoices as ws}
+                    <option value={ws.id} selected={currentWebserver === ws.id}>{ws.label}</option>
+                  {/each}
+                </select>
+              </div>
+
+              <div>
+                <label class="block text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-1.5">{$t('projects.publicHostname')}</label>
+                <input
+                  type="text"
+                  class="w-full px-2 py-1.5 text-xs font-mono rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]"
+                  placeholder={$t('projects.publicHostnamePlaceholder')}
+                  value={hostnameEdits[proj.name] ?? proj.publicHostname ?? ''}
+                  on:input={(e) => hostnameEdits[proj.name] = inputValue(e)}
+                  on:blur={() => savePublicHostname(proj)}
+                  on:keydown={(e) => { if (e.key === 'Enter') blurTarget(e); }}
+                  disabled={savingProjectSettings[proj.name]}
+                  title={$t('projects.publicHostnameHint')}
+                />
+              </div>
+            </div>
+            <p class="text-[10px] text-[var(--color-text-secondary)] mt-2">{$t('projects.publicHostnameHint')}</p>
           {/if}
         </div>
       {/each}

@@ -5,9 +5,14 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
+	"strconv"
 	"strings"
+
+	"DevBox/internal/platform"
 )
 
 const (
@@ -16,71 +21,123 @@ const (
 	nginxMinVersion   = "1.20.2"
 )
 
+// nginxFallbackVersions is used when scraping nginx.org returns nothing
+// (network issue, page restructured, etc.) so the UI never shows an empty list.
+// Keep recent + a couple of older stable lines; update opportunistically.
+var nginxFallbackVersions = []string{"1.27.4", "1.26.3", "1.24.0", "1.22.1"}
+
 type NginxManager struct{}
 
 func NewNginxManager() *NginxManager { return &NginxManager{} }
 
 func (n *NginxManager) Name() string       { return "nginx" }
 func (n *NginxManager) DisplayName() string { return "Nginx" }
-func (n *NginxManager) DefaultPort() int    { return 8080 }
+func (n *NginxManager) DefaultPort() int    { return 8503 }
 
 func (n *NginxManager) IsInstalled() bool {
-	_, err := os.Stat(filepath.Join(serviceBaseDir("nginx"), "nginx.exe"))
+	if goruntime.GOOS == "darwin" {
+		_, err := os.Stat(filepath.Join(serviceBaseDir("nginx"), "sbin", platform.BinaryName("nginx")))
+		return err == nil
+	}
+	_, err := os.Stat(filepath.Join(serviceBaseDir("nginx"), platform.BinaryName("nginx")))
 	return err == nil
 }
 
 func (n *NginxManager) ListVersions() ([]AvailableVersion, error) {
+	versions := n.scrapeVersions()
+	if len(versions) == 0 {
+		// Scraping failed or page restructured — fall back so the UI is never empty.
+		versions = n.fallbackVersions()
+	}
+	return versions, nil
+}
+
+// scrapeVersions parses nginx.org/en/download.html for available versions.
+// Returns an empty slice on network error or no matches; caller handles fallback.
+func (n *NginxManager) scrapeVersions() []AvailableVersion {
 	resp, err := http.Get(nginxDownloadPage)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch nginx versions: %w", err)
+		return nil
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil
 	}
 
-	pageStr := string(body)
-
-	// Find all zip download links
-	re := regexp.MustCompile(`/download/nginx-(\d+\.\d+\.\d+)\.zip`)
-	matches := re.FindAllStringSubmatch(pageStr, -1)
+	var re *regexp.Regexp
+	if goruntime.GOOS == "windows" {
+		re = regexp.MustCompile(`/download/nginx-(\d+\.\d+\.\d+)\.zip`)
+	} else {
+		re = regexp.MustCompile(`/download/nginx-(\d+\.\d+\.\d+)\.tar\.gz`)
+	}
+	matches := re.FindAllStringSubmatch(string(body), -1)
 
 	seen := map[string]bool{}
 	var versions []AvailableVersion
 
 	for _, m := range matches {
 		ver := m[1]
-		if seen[ver] {
+		if seen[ver] || !versionAtLeast(ver, nginxMinVersion) {
 			continue
 		}
-
-		// Filter: minimum nginx 1.20.2
-		if !versionAtLeast(ver, nginxMinVersion) {
-			continue
-		}
-
 		seen[ver] = true
-
-		label := ver
-		if len(versions) == 0 {
-			label = ver + " (Mainline)"
-		} else if len(versions) == 1 {
-			label = ver + " (Stable)"
-		}
-
-		versions = append(versions, AvailableVersion{
-			Version: ver,
-			Label:   label,
-			URL:     nginxDownloadBase + fmt.Sprintf("nginx-%s.zip", ver),
-		})
+		versions = append(versions, n.buildVersionEntry(ver))
 	}
 
-	return versions, nil
+	return versions
+}
+
+func (n *NginxManager) fallbackVersions() []AvailableVersion {
+	var versions []AvailableVersion
+	for _, ver := range nginxFallbackVersions {
+		versions = append(versions, n.buildVersionEntry(ver))
+	}
+	return versions
+}
+
+// buildVersionEntry builds the version entry with the correct mainline/stable label
+// (odd minor = mainline, even minor = stable per nginx's release scheme) and download URL.
+func (n *NginxManager) buildVersionEntry(ver string) AvailableVersion {
+	label := ver
+	if track := nginxReleaseTrack(ver); track != "" {
+		label = ver + " (" + track + ")"
+	}
+
+	var url string
+	if goruntime.GOOS == "windows" {
+		url = nginxDownloadBase + fmt.Sprintf("nginx-%s.zip", ver)
+	} else {
+		url = nginxDownloadBase + fmt.Sprintf("nginx-%s.tar.gz", ver)
+	}
+
+	return AvailableVersion{Version: ver, Label: label, URL: url}
+}
+
+func nginxReleaseTrack(ver string) string {
+	parts := strings.Split(ver, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return ""
+	}
+	if minor%2 == 1 {
+		return "Mainline"
+	}
+	return "Stable"
 }
 
 func (n *NginxManager) Install(version string, port int, progress chan<- Progress) error {
+	if goruntime.GOOS == "darwin" {
+		return n.installDarwin(version, port, progress)
+	}
+	return n.installWindows(version, port, progress)
+}
+
+func (n *NginxManager) installWindows(version string, port int, progress chan<- Progress) error {
 	base := serviceBaseDir("nginx")
 
 	if port <= 0 {
@@ -126,7 +183,7 @@ func (n *NginxManager) Install(version string, port int, progress chan<- Progres
 	}
 
 	// Verify nginx.exe exists in extracted dir
-	if _, err := os.Stat(filepath.Join(extractedDir, "nginx.exe")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(extractedDir, platform.BinaryName("nginx"))); os.IsNotExist(err) {
 		return fmt.Errorf("nginx.exe not found in extracted files - download may be corrupt")
 	}
 
@@ -159,6 +216,87 @@ func (n *NginxManager) Install(version string, port int, progress chan<- Progres
 	return nil
 }
 
+func (n *NginxManager) installDarwin(version string, port int, progress chan<- Progress) error {
+	base := serviceBaseDir("nginx")
+
+	if port <= 0 {
+		port = n.DefaultPort()
+	}
+
+	filename := fmt.Sprintf("nginx-%s.tar.gz", version)
+	downloadURL := nginxDownloadBase + filename
+
+	tmpFile, err := downloadToTmp(downloadURL, filename, progress)
+	if err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+	defer os.Remove(tmpFile)
+
+	if progress != nil {
+		progress <- Progress{Percent: 50, Message: "Extracting source..."}
+	}
+
+	tmpExtract := tmpFile + "-extract"
+	os.RemoveAll(tmpExtract)
+	defer os.RemoveAll(tmpExtract)
+
+	if err := extractTarGz(tmpFile, tmpExtract); err != nil {
+		return fmt.Errorf("extraction failed: %w", err)
+	}
+
+	srcDir := filepath.Join(tmpExtract, fmt.Sprintf("nginx-%s", version))
+	if _, err := os.Stat(srcDir); os.IsNotExist(err) {
+		entries, _ := os.ReadDir(tmpExtract)
+		for _, e := range entries {
+			if e.IsDir() && strings.HasPrefix(e.Name(), "nginx") {
+				srcDir = filepath.Join(tmpExtract, e.Name())
+				break
+			}
+		}
+	}
+
+	if progress != nil {
+		progress <- Progress{Percent: 60, Message: "Compiling nginx (this may take a minute)..."}
+	}
+
+	if err := removeBaseDir(base); err != nil {
+		return fmt.Errorf("failed to clean old installation: %w", err)
+	}
+	os.MkdirAll(base, 0755)
+
+	// Configure
+	configureCmd := exec.Command("./configure", fmt.Sprintf("--prefix=%s", base))
+	configureCmd.Dir = srcDir
+	if out, err := configureCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("configure failed: %s - %w", string(out), err)
+	}
+
+	// Make
+	makeCmd := exec.Command("make")
+	makeCmd.Dir = srcDir
+	if out, err := makeCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("make failed: %s - %w", string(out), err)
+	}
+
+	// Make install
+	installCmd := exec.Command("make", "install")
+	installCmd.Dir = srcDir
+	if out, err := installCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("make install failed: %s - %w", string(out), err)
+	}
+
+	os.MkdirAll(filepath.Join(base, "conf", "vhosts"), 0755)
+	os.MkdirAll(filepath.Join(base, "logs"), 0755)
+
+	n.writeConfig(port)
+	SaveServiceConfig("nginx", ServiceConfig{Port: port, Version: version})
+
+	if progress != nil {
+		progress <- Progress{Percent: 100, Message: fmt.Sprintf("Nginx %s installed (port %d)", version, port)}
+	}
+	return nil
+}
+
 func (n *NginxManager) Uninstall() error {
 	if IsRunning("nginx") {
 		n.Stop()
@@ -180,7 +318,12 @@ func (n *NginxManager) Start() error {
 	}
 
 	base := serviceBaseDir("nginx")
-	exe := filepath.Join(base, "nginx.exe")
+	var exe string
+	if goruntime.GOOS == "darwin" {
+		exe = filepath.Join(base, "sbin", platform.BinaryName("nginx"))
+	} else {
+		exe = filepath.Join(base, platform.BinaryName("nginx"))
+	}
 
 	// Test config before starting
 	testOut, testErr := runCommand(exe, []string{"-t"}, base)
@@ -212,7 +355,12 @@ func (n *NginxManager) Stop() error {
 	}
 
 	base := serviceBaseDir("nginx")
-	exe := filepath.Join(base, "nginx.exe")
+	var exe string
+	if goruntime.GOOS == "darwin" {
+		exe = filepath.Join(base, "sbin", platform.BinaryName("nginx"))
+	} else {
+		exe = filepath.Join(base, platform.BinaryName("nginx"))
+	}
 
 	runCommandSilent(exe, []string{"-s", "stop"}, base)
 	return StopProcess("nginx")

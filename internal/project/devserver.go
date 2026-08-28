@@ -8,10 +8,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"DevBox/internal/config"
+	"DevBox/internal/platform"
+	"DevBox/internal/runtime"
 	"DevBox/internal/service"
 )
 
@@ -118,6 +119,24 @@ func StartDevServer(proj Project) (int, error) {
 		return 0, fmt.Errorf("no start command available for framework: %s", proj.Framework)
 	}
 
+	// Resolve the runtime the project should run under: its pinned version, or
+	// the globally active one. The bin dir goes first on PATH for the child
+	// (so `npx`, `python`, `go`, `cargo` resolve to that version) and the
+	// executable itself is resolved there too — exec.Command's own lookup uses
+	// DevBox's PATH, which may predate the runtime install.
+	binDir := ResolveRuntimeBinDir(proj)
+	if binDir != "" {
+		for _, candidate := range []string{
+			filepath.Join(binDir, platform.ScriptName(executable)),
+			filepath.Join(binDir, platform.BinaryName(executable)),
+		} {
+			if _, err := os.Stat(candidate); err == nil {
+				executable = candidate
+				break
+			}
+		}
+	}
+
 	cmd := exec.Command(executable, args...)
 	cmd.Dir = proj.Path
 
@@ -126,12 +145,12 @@ func StartDevServer(proj Project) (int, error) {
 		fmt.Sprintf("PORT=%d", actualPort),
 		"HOST=127.0.0.1",
 	)
-
-	// Windows: create new process group + hide window
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
-		HideWindow:    true,
+	if binDir != "" {
+		cmd.Env = append(cmd.Env, "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
+
+	// Create new process group + hide window (platform-aware)
+	platform.SetProcessAttrs(cmd, true, true)
 
 	// Redirect output to log file
 	logPath := devServerLogFile(proj.Name)
@@ -361,24 +380,47 @@ func GetDevServerLogs(projectName string, lines int) ([]string, error) {
 	return allLines, nil
 }
 
+// ResolveRuntimeVersion returns the runtime version a project should use: its
+// pinned version when that version is installed, otherwise the global one.
+// Returns "" when the runtime has no usable version at all.
+func ResolveRuntimeVersion(proj Project) string {
+	if proj.Runtime == "" || proj.Runtime == "static" {
+		return ""
+	}
+	mgr, ok := runtime.Registry[proj.Runtime]
+	if !ok {
+		return ""
+	}
+	if proj.RuntimeVersion != "" {
+		if _, err := os.Stat(mgr.BinaryPath(proj.RuntimeVersion)); err == nil {
+			return proj.RuntimeVersion
+		}
+	}
+	global, _ := mgr.GetGlobal()
+	return global
+}
+
+// ResolveRuntimeBinDir returns the bin directory of the resolved runtime version, or "".
+func ResolveRuntimeBinDir(proj Project) string {
+	ver := ResolveRuntimeVersion(proj)
+	if ver == "" {
+		return ""
+	}
+	mgr, ok := runtime.Registry[proj.Runtime]
+	if !ok {
+		return ""
+	}
+	dir := mgr.BinaryPath(ver)
+	if _, err := os.Stat(dir); err != nil {
+		return ""
+	}
+	return dir
+}
+
 // --- internal helpers ---
 
 func isDevServerProcessAlive(pid int) bool {
-	const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-	const STILL_ACTIVE = 259
-
-	handle, err := syscall.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
-	if err != nil {
-		return false
-	}
-	defer syscall.CloseHandle(handle)
-
-	var exitCode uint32
-	err = syscall.GetExitCodeProcess(handle, &exitCode)
-	if err != nil {
-		return false
-	}
-	return exitCode == STILL_ACTIVE
+	return platform.IsProcessRunning(pid)
 }
 
 func isDevServerRunningFromPID(projectName string) bool {

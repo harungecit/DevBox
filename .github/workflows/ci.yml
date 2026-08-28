@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**', '*.md']
+  pull_request:
+    branches: [main]
+    paths-ignore: ['docs/**', '*.md']
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.24'
+  NODE_VERSION: '20'
+  WAILS_VERSION: 'v2.11.0'
+
+jobs:
+  backend:
+    name: Go (vet, test, cross-compile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      # The Go embed needs a frontend/dist to exist even for vet/test.
+      - run: mkdir -p frontend/dist && touch frontend/dist/.keep
+      - run: go vet ./...
+      - run: go test ./... -count=1
+      - name: Cross-compile check (windows, darwin)
+        run: |
+          GOOS=windows GOARCH=amd64 go build ./...
+          GOOS=darwin  GOARCH=arm64 go build ./...
+          GOOS=darwin  GOARCH=amd64 go build ./...
+
+  frontend:
+    name: Frontend (svelte-check, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+
+  windows-build:
+    name: Windows build (wails)
+    needs: [backend, frontend]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+      - name: Build
+        run: wails build -clean -ldflags "-X DevBox/internal/updater.Version=0.0.0-ci"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DevBox-windows-amd64-ci
+          path: build/bin/DevBox.exe
+          retention-days: 7

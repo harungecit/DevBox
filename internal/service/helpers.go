@@ -1,20 +1,32 @@
 package service
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"DevBox/internal/config"
+	"DevBox/internal/platform"
 )
+
+// MysqlConfigName returns the MySQL/MariaDB config filename for the current OS.
+// Windows uses "my.ini", macOS/Linux use "my.cnf".
+func MysqlConfigName() string {
+	if goruntime.GOOS == "windows" {
+		return "my.ini"
+	}
+	return "my.cnf"
+}
 
 // downloadToTmp downloads a file to the DevBox tmp directory
 func downloadToTmp(url, filename string, progress chan<- Progress) (string, error) {
@@ -118,20 +130,75 @@ func extractZip(zipPath, destDir string) error {
 	return nil
 }
 
-// hiddenSysProcAttr returns SysProcAttr that hides the console window on Windows.
-// Uses HideWindow only (NOT CREATE_NO_WINDOW) because CREATE_NO_WINDOW breaks
-// programs that start subprocesses (like pg_ctl, mysqld --initialize, etc).
-func hiddenSysProcAttr() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{
-		HideWindow: true,
+// extractTarGz extracts a .tar.gz file to destDir
+func extractTarGz(tarGzPath, destDir string) error {
+	f, err := os.Open(tarGzPath)
+	if err != nil {
+		return fmt.Errorf("failed to open archive: %w", err)
 	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	os.MkdirAll(destDir, 0755)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("tar read error: %w", err)
+		}
+
+		name := filepath.ToSlash(header.Name)
+		if strings.Contains(name, "..") {
+			continue
+		}
+
+		target := filepath.Join(destDir, header.Name)
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			os.MkdirAll(target, 0755)
+		case tar.TypeReg:
+			os.MkdirAll(filepath.Dir(target), 0755)
+			outFile, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.FileMode(header.Mode))
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(outFile, tr); err != nil {
+				outFile.Close()
+				return err
+			}
+			outFile.Close()
+		case tar.TypeSymlink:
+			os.MkdirAll(filepath.Dir(target), 0755)
+			os.Symlink(header.Linkname, target)
+		}
+	}
+
+	return nil
+}
+
+// extractArchive extracts a .zip or .tar.gz file to destDir based on extension
+func extractArchive(archivePath, destDir string) error {
+	if strings.HasSuffix(archivePath, ".tar.gz") || strings.HasSuffix(archivePath, ".tgz") {
+		return extractTarGz(archivePath, destDir)
+	}
+	return extractZip(archivePath, destDir)
 }
 
 // runCommand runs a command and returns combined output (hidden console)
 func runCommand(executable string, args []string, workDir string) (string, error) {
 	cmd := exec.Command(executable, args...)
 	cmd.Dir = workDir
-	cmd.SysProcAttr = hiddenSysProcAttr()
+	platform.SetProcessAttrs(cmd, false, true)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -140,7 +207,7 @@ func runCommand(executable string, args []string, workDir string) (string, error
 func runCommandSilent(executable string, args []string, workDir string) error {
 	cmd := exec.Command(executable, args...)
 	cmd.Dir = workDir
-	cmd.SysProcAttr = hiddenSysProcAttr()
+	platform.SetProcessAttrs(cmd, false, true)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	return cmd.Run()
@@ -242,6 +309,22 @@ func removeBaseDir(base string) error {
 		return fmt.Errorf("failed to remove %s: %w", base, lastErr)
 	}
 	return nil
+}
+
+// archiveSuffix returns the platform-appropriate archive extension
+func archiveSuffix() string {
+	if goruntime.GOOS == "windows" {
+		return ".zip"
+	}
+	return ".tar.gz"
+}
+
+// darwinArch returns the macOS architecture string for downloads
+func darwinArch() string {
+	if goruntime.GOARCH == "arm64" {
+		return "arm64"
+	}
+	return "x86_64"
 }
 
 // majorVersion extracts the major version number from a version string

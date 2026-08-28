@@ -12,25 +12,33 @@ export interface AppConfig {
   language: string;
   theme: string;
   autoStart: boolean;
+  startMinimized: boolean;
+  closeToTray: boolean;
   dataDir: string;
   activeRuntimes: Record<string, string>;
   autoStartSvcs: string[];
+  proxyEnabled: boolean;
+  versionCacheHours: number;
 }
 
 export const appConfig = writable<AppConfig>({
   language: 'en',
   theme: 'dark',
   autoStart: false,
+  startMinimized: false,
+  closeToTray: true,
   dataDir: '',
   activeRuntimes: {},
   autoStartSvcs: [],
+  proxyEnabled: false,
+  versionCacheHours: 48,
 });
 
 // Load config from backend
 export async function loadConfig() {
   try {
     const cfg = await GetConfig();
-    appConfig.set(cfg as AppConfig);
+    appConfig.set(cfg as unknown as AppConfig);
     theme.set(cfg.theme || 'dark');
   } catch (e) {
     console.error('Failed to load config:', e);
@@ -40,10 +48,10 @@ export async function loadConfig() {
 // Apply theme to document
 export function applyTheme(t: string) {
   const root = document.documentElement;
-  
+
   // Clear any existing theme classes
   root.classList.remove('dark', 'light');
-  
+
   if (t === 'system') {
     const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     if (isDark) {
@@ -60,7 +68,7 @@ export function applyTheme(t: string) {
     root.classList.add('light');
     root.style.colorScheme = 'light';
   }
-  
+
   // Save to localStorage for quick boot persistence
   localStorage.setItem('devbox-theme', t);
 }

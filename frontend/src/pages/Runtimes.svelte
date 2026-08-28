@@ -3,66 +3,156 @@
   import { t } from '../lib/i18n/index';
   import StatusBadge from '../lib/components/StatusBadge.svelte';
   import ProgressBar from '../lib/components/ProgressBar.svelte';
+  import ConfirmDialog from '../lib/components/ConfirmDialog.svelte';
   import { runtimeLogos } from '../lib/logos';
   import {
-    GetRemoteVersions,
+    GetRemoteVersionsInfo,
     GetInstalledVersions,
+    GetInstalledCounts,
     InstallRuntime,
+    UpdateRuntime,
     UninstallRuntime,
     SetGlobalRuntime,
-    GetGlobalRuntime,
     GetPHPExtensions,
     TogglePHPExtension,
-    IsComposerInstalled,
-    InstallComposer,
-    GetComposerVersion,
-    StartPHPCGI,
+    GetPeclExtensions,
+    InstallPeclExtension,
+    UninstallPeclExtension,
+    GetPHPCGIInstances,
+    RestartPHPCGI,
     StopPHPCGI,
-    IsPHPCGIRunning,
-    IsBunInstalled,
-    InstallBun,
-    GetBunVersion,
-    UninstallBun,
+    GetPHPIniSettings,
+    SetPHPIniSetting,
+    GetPHPIniPath,
+    OpenFileInEditor,
   } from '../../wailsjs/go/main/App';
-  import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime';
+  import { EventsOn } from '../../wailsjs/runtime/runtime';
+  import { runtimeInstalls, startRuntimeInstall, clearRuntimeInstall } from '../lib/stores/installs';
 
   interface VersionInfo {
     number: string;
     stable: boolean;
     current: boolean;
     installed: boolean;
+    updateFor?: string;
   }
 
   interface PHPExtension {
     name: string;
     enabled: boolean;
+    zend?: boolean;
+    source?: string;
+  }
+
+  interface PeclExtension {
+    name: string;
+    description: string;
+    installed: boolean;
+    version: string;
+    zend: boolean;
+  }
+
+  let peclExtensions: PeclExtension[] = [];
+  let peclBusy: Record<string, { percent: number; message: string }> = {};
+
+  async function loadPecl(version: string) {
+    try {
+      peclExtensions = (await GetPeclExtensions(version)) || [];
+    } catch {
+      peclExtensions = [];
+    }
+  }
+
+  async function installPecl(name: string) {
+    const active = installedVersions.find(v => v.current);
+    if (!active) return;
+    peclBusy = { ...peclBusy, [name]: { percent: 0, message: '' } };
+    errorMessage = '';
+    try {
+      await InstallPeclExtension(active.number, name);
+    } catch (e) {
+      errorMessage = String(e);
+      const { [name]: _r, ...rest } = peclBusy; peclBusy = rest;
+    }
+  }
+
+  async function removePecl(name: string) {
+    const active = installedVersions.find(v => v.current);
+    if (!active) return;
+    try {
+      await UninstallPeclExtension(active.number, name);
+      await loadExtensions(active.number);
+      await loadPecl(active.number);
+    } catch (e) {
+      errorMessage = String(e);
+    }
+  }
+
+  interface PHPCGIInstance {
+    version: string;
+    port: number;
+    pid: number;
   }
 
   let activeTab: string = 'go';
   let installedVersions: VersionInfo[] = [];
   let remoteVersions: VersionInfo[] = [];
+  let installedCounts: Record<string, number> = {};
   let loadingRemote: boolean = false;
   let loadingInstalled: boolean = false;
-  let installing: string = ''; // version being installed
-  let progressPercent: number = 0;
-  let progressMessage: string = '';
   let errorMessage: string = '';
+  let fetchedAt: string = '';
+
+  // Install state for the active tab — derived from the global store so it
+  // survives leaving and returning to this page.
+  $: currentInstall = $runtimeInstalls[activeTab];
+  $: installing = currentInstall?.version ?? '';
+
+  // installed version → newest version of its release line (in-place update)
+  $: updates = (() => {
+    const map: Record<string, string> = {};
+    for (const v of remoteVersions) {
+      if (!v.updateFor) continue;
+      const cur = map[v.updateFor];
+      if (!cur || compareVersions(v.number, cur) > 0) map[v.updateFor] = v.number;
+    }
+    return map;
+  })();
+  $: updateCount = Object.keys(updates).length;
+
+  function compareVersions(a: string, b: string): number {
+    const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const d = (pa[i] || 0) - (pb[i] || 0);
+      if (d !== 0) return d;
+    }
+    return 0;
+  }
 
   // PHP-specific state
   let phpExtensions: PHPExtension[] = [];
   let loadingExtensions: boolean = false;
-  let composerInstalled: boolean = false;
-  let composerVersion: string = '';
-  let installingComposer: boolean = false;
-  let phpCgiRunning: boolean = false;
-  let phpCgiPort: number = 9000;
+  let phpCgiInstances: PHPCGIInstance[] = [];
+  let phpCgiBusy: boolean = false;
   let extensionFilter: string = '';
 
-  // Bun state
-  let bunInstalled: boolean = false;
-  let bunVersion: string = '';
-  let installingBun: boolean = false;
-  let uninstallingBun: boolean = false;
+  // PHP Settings state
+  let phpIniSettings: Record<string, string> = {};
+  let phpIniEdited: Record<string, string> = {};
+  let loadingIniSettings: boolean = false;
+  let savingIniSettings: boolean = false;
+  let iniSaveMessage: string = '';
+
+  const iniDirectives = [
+    { key: 'max_execution_time', type: 'text', suffix: 'seconds' },
+    { key: 'memory_limit', type: 'text', suffix: '' },
+    { key: 'upload_max_filesize', type: 'text', suffix: '' },
+    { key: 'post_max_size', type: 'text', suffix: '' },
+    { key: 'max_file_uploads', type: 'text', suffix: '' },
+    { key: 'display_errors', type: 'select', options: ['On', 'Off'] },
+    { key: 'error_reporting', type: 'select', options: ['E_ALL', 'E_ALL & ~E_NOTICE', 'E_ALL & ~E_DEPRECATED & ~E_STRICT', 'E_ERROR | E_WARNING | E_PARSE'] },
+    { key: 'date.timezone', type: 'text', suffix: '' },
+  ];
 
   const tabs = [
     { id: 'go', label: 'Go' },
@@ -71,6 +161,14 @@
     { id: 'python', label: 'Python' },
     { id: 'rust', label: 'Rust' },
   ];
+
+  async function loadCounts() {
+    try {
+      installedCounts = (await GetInstalledCounts()) || {};
+    } catch {
+      // non-fatal
+    }
+  }
 
   async function loadInstalled() {
     loadingInstalled = true;
@@ -84,12 +182,13 @@
     loadingInstalled = false;
   }
 
-  async function loadRemote() {
+  async function loadRemote(force: boolean = false) {
     loadingRemote = true;
     errorMessage = '';
     try {
-      const result = await GetRemoteVersions(activeTab);
-      remoteVersions = result || [];
+      const result = await GetRemoteVersionsInfo(activeTab, force);
+      remoteVersions = result?.versions || [];
+      fetchedAt = result?.fetchedAt ? new Date(result.fetchedAt).toLocaleString() : '';
     } catch (e) {
       console.error('Failed to load remote:', e);
       errorMessage = String(e);
@@ -100,33 +199,73 @@
 
   async function switchTab(tab: string) {
     activeTab = tab;
-    installing = '';
-    progressPercent = 0;
-    progressMessage = '';
     errorMessage = '';
     await Promise.all([loadInstalled(), loadRemote()]);
     if (tab === 'php') {
       await loadPHPExtras();
     }
-    if (tab === 'node') {
-      await loadBunStatus();
-    }
   }
 
   async function loadPHPExtras() {
-    // Find the active PHP version
     const active = installedVersions.find(v => v.current);
     if (active) {
       await loadExtensions(active.number);
+      await loadPHPIniSettings();
+      await loadPecl(active.number);
     }
+    await loadPhpCgi();
+  }
+
+  async function loadPhpCgi() {
     try {
-      composerInstalled = await IsComposerInstalled();
-      if (composerInstalled) {
-        composerVersion = await GetComposerVersion();
-      }
-      phpCgiRunning = await IsPHPCGIRunning();
+      phpCgiInstances = (await GetPHPCGIInstances()) || [];
+    } catch {
+      phpCgiInstances = [];
+    }
+  }
+
+  async function loadPHPIniSettings() {
+    const active = installedVersions.find(v => v.current);
+    if (!active) return;
+    loadingIniSettings = true;
+    try {
+      const settings = await GetPHPIniSettings(active.number);
+      phpIniSettings = settings || {};
+      phpIniEdited = { ...phpIniSettings };
     } catch (e) {
-      // ignore
+      console.error('Failed to load PHP ini settings:', e);
+    }
+    loadingIniSettings = false;
+  }
+
+  async function savePHPIniSettings() {
+    const active = installedVersions.find(v => v.current);
+    if (!active) return;
+    savingIniSettings = true;
+    iniSaveMessage = '';
+    try {
+      for (const dir of iniDirectives) {
+        if (phpIniEdited[dir.key] !== phpIniSettings[dir.key]) {
+          await SetPHPIniSetting(active.number, dir.key, phpIniEdited[dir.key]);
+        }
+      }
+      phpIniSettings = { ...phpIniEdited };
+      iniSaveMessage = phpCgiInstances.length > 0 ? 'restart' : 'saved';
+      setTimeout(() => { iniSaveMessage = ''; }, 4000);
+    } catch (e) {
+      errorMessage = String(e);
+    }
+    savingIniSettings = false;
+  }
+
+  async function openPhpIni() {
+    const active = installedVersions.find(v => v.current);
+    if (!active) return;
+    try {
+      const path = await GetPHPIniPath(active.number);
+      await OpenFileInEditor(path);
+    } catch (e) {
+      errorMessage = String(e);
     }
   }
 
@@ -152,149 +291,126 @@
     }
   }
 
-  async function installComposer() {
-    installingComposer = true;
+  async function restartPhpCgi() {
+    phpCgiBusy = true;
     try {
-      await InstallComposer();
-    } catch (e) {
-      errorMessage = String(e);
-      installingComposer = false;
-    }
-  }
-
-  async function togglePhpCgi() {
-    const active = installedVersions.find(v => v.current);
-    if (!active) return;
-    try {
-      if (phpCgiRunning) {
-        await StopPHPCGI();
-      } else {
-        await StartPHPCGI(active.number, phpCgiPort);
-      }
-      phpCgiRunning = await IsPHPCGIRunning();
+      await RestartPHPCGI();
+      await loadPhpCgi();
     } catch (e) {
       errorMessage = String(e);
     }
+    phpCgiBusy = false;
   }
 
-  async function loadBunStatus() {
+  async function stopPhpCgi() {
+    phpCgiBusy = true;
     try {
-      bunInstalled = await IsBunInstalled();
-      if (bunInstalled) {
-        bunVersion = await GetBunVersion();
-      }
-    } catch (e) {
-      // ignore
-    }
-  }
-
-  async function installBun() {
-    installingBun = true;
-    errorMessage = '';
-    try {
-      await InstallBun();
-    } catch (e) {
-      errorMessage = String(e);
-      installingBun = false;
-    }
-  }
-
-  async function uninstallBun() {
-    uninstallingBun = true;
-    try {
-      await UninstallBun();
-      bunInstalled = false;
-      bunVersion = '';
+      await StopPHPCGI();
+      await loadPhpCgi();
     } catch (e) {
       errorMessage = String(e);
     }
-    uninstallingBun = false;
+    phpCgiBusy = false;
   }
 
   async function install(version: string) {
-    installing = version;
-    progressPercent = 0;
-    progressMessage = '';
+    startRuntimeInstall(activeTab, version);
     errorMessage = '';
     try {
       await InstallRuntime(activeTab, version);
-      await Promise.all([loadInstalled(), loadRemote()]);
     } catch (e) {
       errorMessage = String(e);
+      clearRuntimeInstall(activeTab);
     }
-    installing = '';
   }
 
-  async function uninstall(version: string) {
+  async function update(from: string, to: string) {
+    startRuntimeInstall(activeTab, to);
+    errorMessage = '';
+    try {
+      await UpdateRuntime(activeTab, from, to);
+    } catch (e) {
+      errorMessage = String(e);
+      clearRuntimeInstall(activeTab);
+    }
+  }
+
+  function dismissInstallError() {
+    clearRuntimeInstall(activeTab);
+  }
+
+  // Uninstall confirmation + busy state.
+  let pendingUninstall: string | null = null;
+  let uninstallingVersion: string | null = null;
+
+  function requestUninstall(version: string) {
+    pendingUninstall = version;
+  }
+
+  function cancelUninstall() {
+    if (uninstallingVersion) return;
+    pendingUninstall = null;
+  }
+
+  async function confirmUninstall() {
+    if (!pendingUninstall) return;
+    const version = pendingUninstall;
+    uninstallingVersion = version;
     try {
       await UninstallRuntime(activeTab, version);
-      await Promise.all([loadInstalled(), loadRemote()]);
+      await Promise.all([loadInstalled(), loadRemote(), loadCounts()]);
     } catch (e) {
       errorMessage = String(e);
     }
+    uninstallingVersion = null;
+    pendingUninstall = null;
   }
 
   async function setGlobal(version: string) {
     try {
       await SetGlobalRuntime(activeTab, version);
       await loadInstalled();
+      if (activeTab === 'php') await loadPHPExtras();
     } catch (e) {
       errorMessage = String(e);
     }
   }
 
-  // Listen for progress events from Go backend
-  function onProgress(data: any) {
-    if (data.name === activeTab && data.version === installing) {
-      progressPercent = data.percent;
-      progressMessage = data.message;
-    }
-  }
-
-  function onError(data: any) {
-    if (data.name === activeTab) {
-      errorMessage = data.error;
-      installing = '';
-    }
-  }
+  let eventUnsubs: Array<() => void> = [];
 
   onMount(() => {
-    EventsOn('runtime:progress', onProgress);
-    EventsOn('runtime:error', onError);
-    EventsOn('runtime:installed', () => {
-      loadInstalled();
+    eventUnsubs.push(EventsOn('runtime:installed', (data: any) => {
+      loadCounts();
+      if (data?.name === activeTab) {
+        loadInstalled();
+        loadRemote();
+        if (activeTab === 'php') loadPHPExtras();
+      }
+    }));
+    eventUnsubs.push(EventsOn('versions:refreshed', () => {
       loadRemote();
-    });
-    EventsOn('composer:installed', () => {
-      installingComposer = false;
-      composerInstalled = true;
-      GetComposerVersion().then(v => composerVersion = v);
-    });
-    EventsOn('composer:error', (data: any) => {
-      installingComposer = false;
-      errorMessage = data.error;
-    });
-    EventsOn('bun:installed', () => {
-      installingBun = false;
-      bunInstalled = true;
-      GetBunVersion().then(v => bunVersion = v);
-    });
-    EventsOn('bun:error', (data: any) => {
-      installingBun = false;
-      errorMessage = data.error;
-    });
+    }));
+    eventUnsubs.push(EventsOn('phpext:progress', (d: any) => {
+      if (!d?.name) return;
+      peclBusy = { ...peclBusy, [d.name]: { percent: d.percent ?? 0, message: d.message ?? '' } };
+    }));
+    eventUnsubs.push(EventsOn('phpext:installed', (d: any) => {
+      const { [d?.name]: _r, ...rest } = peclBusy; peclBusy = rest;
+      const active = installedVersions.find(v => v.current);
+      if (active) { loadExtensions(active.number); loadPecl(active.number); }
+    }));
+    eventUnsubs.push(EventsOn('phpext:error', (d: any) => {
+      const { [d?.name]: _r, ...rest } = peclBusy; peclBusy = rest;
+      errorMessage = `${d?.name}: ${d?.error || 'install failed'}`;
+    }));
+    loadCounts();
     loadInstalled();
     loadRemote();
   });
 
   onDestroy(() => {
-    EventsOff('runtime:progress');
-    EventsOff('runtime:error');
-    EventsOff('runtime:installed');
-    EventsOff('composer:installed');
-    EventsOff('composer:error');
-    EventsOff('bun:installed');
-    EventsOff('bun:error');
+    eventUnsubs.forEach(fn => fn());
+    eventUnsubs = [];
   });
 </script>
 
@@ -318,6 +434,11 @@
       >
         <div class="w-5 h-5 rounded overflow-hidden">{@html runtimeLogos[tab.id] || ''}</div>
         {tab.label}
+        {#if installedCounts[tab.id] > 0}
+          <span class="min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center {activeTab === tab.id ? 'bg-primary-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-[var(--color-text-secondary)]'}">
+            {installedCounts[tab.id]}
+          </span>
+        {/if}
       </button>
     {/each}
   </div>
@@ -330,15 +451,23 @@
     </div>
   {/if}
 
-  <!-- Progress bar when installing -->
-  {#if installing}
-    <div class="card">
-      <div class="flex items-center gap-3 mb-2">
-        <div class="w-2 h-2 rounded-full bg-primary-500 animate-pulse"></div>
-        <span class="text-sm font-medium">{$t('runtimes.downloading')} {activeTab} {installing}</span>
+  <!-- Progress bar / install error when an install is in flight or just failed -->
+  {#if currentInstall}
+    {#if currentInstall.error}
+      <div class="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+        <span class="font-medium">{activeTab} {currentInstall.version}:</span>
+        {currentInstall.error}
+        <button class="ml-2 underline" on:click={dismissInstallError}>{$t('common.dismiss')}</button>
       </div>
-      <ProgressBar percent={progressPercent} message={progressMessage} />
-    </div>
+    {:else}
+      <div class="card">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-2 h-2 rounded-full bg-primary-500 animate-pulse"></div>
+          <span class="text-sm font-medium">{$t('runtimes.downloading')} {activeTab} {currentInstall.version}</span>
+        </div>
+        <ProgressBar percent={currentInstall.percent} message={currentInstall.message} />
+      </div>
+    {/if}
   {/if}
 
   <div class="space-y-6">
@@ -348,6 +477,9 @@
         <h3 class="text-base font-bold flex items-center gap-2">
           {$t('runtimes.installed')}
           <span class="badge badge-info">{installedVersions.length}</span>
+          {#if updateCount > 0}
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold uppercase">{$t('runtimes.updatesAvailable', updateCount)}</span>
+          {/if}
         </h3>
         {#if loadingInstalled}
           <span class="text-xs text-[var(--color-text-secondary)] animate-pulse">{$t('common.loading')}</span>
@@ -357,6 +489,7 @@
       {#if installedVersions.length > 0}
         <div class="space-y-2">
           {#each installedVersions as ver}
+            {@const target = updates[ver.number]}
             <div class="flex items-center justify-between p-4 rounded-xl border border-[var(--color-border)] hover:bg-[var(--color-bg)] transition-colors">
               <div class="flex items-center gap-4">
                 <div class="w-8 h-8 rounded-lg overflow-hidden shadow-sm">
@@ -364,14 +497,33 @@
                 </div>
                 <span class="font-mono text-sm font-semibold">{ver.number}</span>
                 {#if ver.current}
-                  <StatusBadge status="active" label={$t('runtimes.active')} />
+                  <span title={$t('runtimes.activeHint')}>
+                    <StatusBadge status="active" label={$t('runtimes.active')} />
+                  </span>
+                {/if}
+                {#if target}
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold font-mono">→ {target}</span>
                 {/if}
               </div>
               <div class="flex gap-2">
+                {#if target}
+                  <button
+                    class="btn-icon bg-amber-500 hover:bg-amber-600 text-white shadow-sm"
+                    on:click={() => update(ver.number, target)}
+                    disabled={installing !== ''}
+                    title="{$t('runtimes.updateTo', target)} — {$t('runtimes.updateHint')}"
+                  >
+                    {#if installing === target}
+                      <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    {:else}
+                      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    {/if}
+                  </button>
+                {/if}
                 {#if !ver.current}
-                  <button 
-                    class="btn-icon bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm" 
-                    on:click={() => setGlobal(ver.number)} 
+                  <button
+                    class="btn-icon bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+                    on:click={() => setGlobal(ver.number)}
                     disabled={installing !== ''}
                     title={$t('runtimes.setGlobal')}
                   >
@@ -380,11 +532,15 @@
                 {/if}
                 <button
                   class="btn-icon text-red-500 hover:bg-red-500/10"
-                  on:click={() => uninstall(ver.number)}
-                  disabled={installing !== ''}
+                  on:click={() => requestUninstall(ver.number)}
+                  disabled={installing !== '' || uninstallingVersion !== null}
                   title={$t('runtimes.uninstall')}
                 >
-                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  {#if uninstallingVersion === ver.number}
+                    <div class="w-4 h-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+                  {:else}
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  {/if}
                 </button>
               </div>
             </div>
@@ -424,7 +580,11 @@
                 class="flex items-center justify-between px-2.5 py-1.5 rounded-lg border transition-all text-xs {ext.enabled ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-[var(--color-border)] bg-[var(--color-bg)]'}"
                 on:click={() => toggleExtension(ext)}
               >
-                <span class="font-mono truncate">{ext.name}</span>
+                <span class="font-mono truncate flex items-center gap-1">
+                  {ext.name}
+                  {#if ext.source === 'pecl'}<span class="text-[8px] px-1 rounded bg-purple-500/10 text-purple-500 uppercase font-bold">{$t('runtimes.labelPecl')}</span>{/if}
+                  {#if ext.zend}<span class="text-[8px] px-1 rounded bg-slate-500/10 text-slate-500 uppercase font-bold">{$t('runtimes.peclZend')}</span>{/if}
+                </span>
                 <span class="text-[10px] font-bold ml-1 {ext.enabled ? 'text-emerald-500' : 'text-slate-400'}">
                   {ext.enabled ? $t('runtimes.enabled') : $t('runtimes.disabled')}
                 </span>
@@ -434,113 +594,140 @@
         {:else}
           <p class="text-xs text-[var(--color-text-secondary)]">No extensions found in php.ini</p>
         {/if}
+
+        <!-- PECL catalog -->
+        <div class="mt-5 pt-4 border-t border-[var(--color-border)]">
+          <h4 class="text-sm font-bold">{$t('runtimes.peclTitle')}</h4>
+          <p class="text-xs text-[var(--color-text-secondary)] mb-3">{$t('runtimes.peclDesc')}</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+            {#each peclExtensions as pe}
+              {@const busy = peclBusy[pe.name]}
+              <div class="flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg border text-xs {pe.installed ? 'border-purple-500/30 bg-purple-500/5' : 'border-[var(--color-border)] bg-[var(--color-bg)]'}">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="font-mono font-bold">{pe.name}</span>
+                    {#if pe.installed && pe.version}<span class="font-mono text-[10px] text-[var(--color-text-secondary)]">{pe.version}</span>{/if}
+                    {#if pe.zend}<span class="text-[8px] px-1 rounded bg-slate-500/10 text-slate-500 uppercase font-bold">{$t('runtimes.peclZend')}</span>{/if}
+                  </div>
+                  <p class="text-[10px] text-[var(--color-text-secondary)] truncate">{busy ? (busy.message || $t('runtimes.peclInstalling')) : pe.description}</p>
+                </div>
+                {#if busy}
+                  <div class="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin flex-shrink-0"></div>
+                {:else if pe.installed}
+                  <button class="text-[10px] px-2 py-1 rounded-lg text-red-500 border border-red-500/20 hover:bg-red-500/10 flex-shrink-0" on:click={() => removePecl(pe.name)}>{$t('runtimes.peclRemove')}</button>
+                {:else}
+                  <button class="text-[10px] px-2 py-1 rounded-lg bg-purple-600 text-white hover:bg-purple-700 flex-shrink-0 disabled:opacity-50" on:click={() => installPecl(pe.name)} disabled={installing !== ''}>{$t('runtimes.peclInstall')}</button>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-4">
-        <!-- Composer Card -->
-        <div class="card p-5">
-          <h3 class="text-base font-bold mb-1">{$t('runtimes.composer')}</h3>
-          <p class="text-xs text-[var(--color-text-secondary)] mb-3">{$t('runtimes.composerDesc')}</p>
-          {#if composerInstalled}
-            <div class="flex items-center gap-2">
-              <span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold uppercase">
-                {$t('runtimes.labelInstalled')}
-              </span>
-              {#if composerVersion}
-                <span class="text-xs font-mono text-[var(--color-text-secondary)]">v{composerVersion}</span>
-              {/if}
-            </div>
-          {:else}
+      <!-- PHP Settings Card -->
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-1">
+          <h3 class="text-base font-bold">{$t('runtimes.phpSettings')}</h3>
+          <button
+            class="text-xs px-3 py-1.5 rounded-lg font-medium border border-[var(--color-border)] hover:bg-[var(--color-bg)] transition-colors"
+            on:click={openPhpIni}
+          >
+            {$t('runtimes.phpOpenIni')}
+          </button>
+        </div>
+        <p class="text-xs text-[var(--color-text-secondary)] mb-4">{$t('runtimes.phpSettingsDesc')}</p>
+
+        {#if loadingIniSettings}
+          <span class="text-xs text-[var(--color-text-secondary)] animate-pulse">{$t('common.loading')}</span>
+        {:else}
+          <div class="space-y-2.5">
+            {#each iniDirectives as dir}
+              <div class="flex items-center gap-3">
+                <span class="font-mono text-xs text-[var(--color-text-secondary)] w-44 shrink-0">{dir.key}</span>
+                {#if dir.type === 'select'}
+                  <select
+                    class="flex-1 px-2 py-1.5 text-xs font-mono rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]"
+                    bind:value={phpIniEdited[dir.key]}
+                  >
+                    {#each dir.options as opt}
+                      <option value={opt}>{opt}</option>
+                    {/each}
+                  </select>
+                {:else}
+                  <input
+                    type="text"
+                    class="flex-1 px-2 py-1.5 text-xs font-mono rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]"
+                    bind:value={phpIniEdited[dir.key]}
+                  />
+                {/if}
+                {#if dir.suffix}
+                  <span class="text-xs text-[var(--color-text-secondary)] shrink-0">{$t('runtimes.' + dir.suffix) || dir.suffix}</span>
+                {/if}
+              </div>
+            {/each}
+          </div>
+
+          <div class="flex items-center gap-3 mt-4">
             <button
               class="btn-primary text-xs"
-              on:click={installComposer}
-              disabled={installingComposer}
+              on:click={savePHPIniSettings}
+              disabled={savingIniSettings}
             >
-              {#if installingComposer}
+              {#if savingIniSettings}
                 <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-1"></div>
               {/if}
-              {$t('runtimes.installComposer')}
+              {$t('runtimes.phpSave')}
             </button>
-          {/if}
-        </div>
-
-        <!-- PHP-CGI Card -->
-        <div class="card p-5">
-          <h3 class="text-base font-bold mb-1">{$t('runtimes.phpCgi')}</h3>
-          <p class="text-xs text-[var(--color-text-secondary)] mb-3">{$t('runtimes.phpCgiDesc')}</p>
-          <div class="flex items-center gap-2">
-            <input
-              type="number"
-              bind:value={phpCgiPort}
-              class="w-20 px-2 py-1 text-xs font-mono rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]"
-              min="1" max="65535"
-              disabled={phpCgiRunning}
-            />
-            <button
-              class="text-xs px-3 py-1.5 rounded-lg font-medium {phpCgiRunning ? 'bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20' : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20'}"
-              on:click={togglePhpCgi}
-            >
-              {phpCgiRunning ? $t('runtimes.stopPhpCgi') : $t('runtimes.startPhpCgi')}
-            </button>
+            {#if iniSaveMessage === 'saved'}
+              <span class="text-xs text-emerald-500">{$t('runtimes.phpSettingsSaved')}</span>
+            {:else if iniSaveMessage === 'restart'}
+              <span class="text-xs text-amber-500">{$t('runtimes.phpSettingsSaved')} — {$t('runtimes.phpRestartCgiHint')}</span>
+              <button class="text-xs text-primary-500 hover:underline" on:click={restartPhpCgi} disabled={phpCgiBusy}>{$t('runtimes.restartPhpCgi')}</button>
+            {/if}
           </div>
-          {#if phpCgiRunning}
-            <p class="text-xs text-emerald-500 mt-2">{$t('runtimes.phpCgiRunning').replace('{0}', String(phpCgiPort))}</p>
-          {/if}
-        </div>
+        {/if}
       </div>
-    {/if}
 
-    <!-- Node.js Package Managers (only when Node tab is active) -->
-    {#if activeTab === 'node' && installedVersions.length > 0}
+      <!-- PHP-CGI Card -->
       <div class="card p-5">
-        <h3 class="text-base font-bold mb-1">{$t('runtimes.packageManagers')}</h3>
-        <p class="text-xs text-[var(--color-text-secondary)] mb-3">{$t('runtimes.packageManagersDesc')}</p>
-        <div class="space-y-2">
-          <!-- npm (built-in) -->
-          <div class="flex items-center justify-between px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-bold">npm</span>
-              <span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold uppercase">{$t('runtimes.builtIn')}</span>
-            </div>
-          </div>
-          <!-- Bun -->
-          <div class="flex items-center justify-between px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-bold">Bun</span>
-              {#if bunInstalled}
-                <span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold uppercase">{$t('runtimes.labelInstalled')}</span>
-                {#if bunVersion}
-                  <span class="text-xs font-mono text-[var(--color-text-secondary)]">v{bunVersion}</span>
-                {/if}
-              {/if}
-            </div>
-            <div class="flex items-center gap-2">
-              {#if bunInstalled}
-                <button
-                  class="text-xs px-2.5 py-1 rounded-lg text-red-500 hover:bg-red-500/10 border border-red-500/20"
-                  on:click={uninstallBun}
-                  disabled={uninstallingBun}
-                >
-                  {#if uninstallingBun}
-                    <div class="w-3 h-3 border-2 border-red-500 border-t-transparent rounded-full animate-spin inline-block mr-1"></div>
-                  {/if}
-                  {$t('runtimes.uninstallBun')}
-                </button>
-              {:else}
-                <button
-                  class="text-xs px-2.5 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-                  on:click={installBun}
-                  disabled={installingBun}
-                >
-                  {#if installingBun}
-                    <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-1"></div>
-                  {/if}
-                  {$t('runtimes.installBun')}
-                </button>
-              {/if}
-            </div>
+        <div class="flex items-center justify-between mb-1">
+          <h3 class="text-base font-bold">{$t('runtimes.phpCgi')}</h3>
+          <div class="flex items-center gap-2">
+            <button
+              class="text-xs px-3 py-1.5 rounded-lg font-medium bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20 disabled:opacity-50"
+              on:click={restartPhpCgi}
+              disabled={phpCgiBusy}
+            >
+              {#if phpCgiBusy}<div class="w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin inline-block mr-1"></div>{/if}
+              {$t('runtimes.restartPhpCgi')}
+            </button>
+            {#if phpCgiInstances.length > 0}
+              <button
+                class="text-xs px-3 py-1.5 rounded-lg font-medium bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 disabled:opacity-50"
+                on:click={stopPhpCgi}
+                disabled={phpCgiBusy}
+              >
+                {$t('runtimes.stopAllPhpCgi')}
+              </button>
+            {/if}
           </div>
         </div>
+        <p class="text-xs text-[var(--color-text-secondary)] mb-3">{$t('runtimes.phpCgiDesc')}</p>
+        {#if phpCgiInstances.length > 0}
+          <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-1.5">{$t('runtimes.phpCgiInstances')}</div>
+          <div class="flex flex-wrap gap-2">
+            {#each phpCgiInstances as inst}
+              <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span class="font-mono text-xs font-bold">PHP {inst.version}</span>
+                <span class="font-mono text-[10px] text-[var(--color-text-secondary)]">127.0.0.1:{inst.port}</span>
+                <span class="font-mono text-[10px] text-slate-400">pid {inst.pid}</span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="text-xs text-[var(--color-text-secondary)] italic">{$t('runtimes.phpCgiNone')}</p>
+        {/if}
       </div>
     {/if}
 
@@ -553,8 +740,10 @@
         <div class="flex items-center gap-4">
           {#if loadingRemote}
             <span class="text-xs text-[var(--color-text-secondary)] animate-pulse">{$t('common.loading')}</span>
+          {:else if fetchedAt}
+            <span class="text-[10px] text-[var(--color-text-secondary)]">{$t('runtimes.cachedAt', fetchedAt)}</span>
           {/if}
-          <button class="text-xs text-primary-500 hover:underline flex items-center gap-1" on:click={loadRemote} disabled={loadingRemote}>
+          <button class="text-xs text-primary-500 hover:underline flex items-center gap-1" on:click={() => loadRemote(true)} disabled={loadingRemote}>
             <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
             {$t('common.refresh')}
           </button>
@@ -564,7 +753,7 @@
       {#if remoteVersions.length > 0}
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-[400px] overflow-y-auto pr-2">
           {#each remoteVersions as ver}
-            <div class="flex items-center justify-between p-3 rounded-lg border border-[var(--color-border)] hover:border-primary-500/30 transition-all bg-[var(--color-bg)]/50">
+            <div class="flex items-center justify-between p-3 rounded-lg border transition-all bg-[var(--color-bg)]/50 {ver.updateFor ? 'border-amber-500/30' : 'border-[var(--color-border)] hover:border-primary-500/30'}">
               <div class="flex flex-col gap-1 min-w-0">
                 <span class="font-mono text-xs font-bold truncate">{ver.number}</span>
                 <div class="flex gap-1">
@@ -573,22 +762,39 @@
                   {/if}
                   {#if ver.installed}
                     <span class="text-[9px] px-1 bg-blue-500/10 text-blue-500 rounded border border-blue-500/20 uppercase font-bold">{$t('runtimes.labelInstalled')}</span>
+                  {:else if ver.updateFor}
+                    <span class="text-[9px] px-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded border border-amber-500/20 uppercase font-bold" title="{ver.updateFor} → {ver.number}">{$t('runtimes.labelUpdate')}</span>
                   {/if}
                 </div>
               </div>
               {#if !ver.installed}
-                <button
-                  class="btn-icon bg-blue-600 hover:bg-blue-700 text-white shadow-sm h-8 w-8"
-                  on:click={() => install(ver.number)}
-                  disabled={installing !== ''}
-                  title={$t('runtimes.install')}
-                >
-                  {#if installing === ver.number}
-                    <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  {:else}
-                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                  {/if}
-                </button>
+                {#if ver.updateFor}
+                  <button
+                    class="btn-icon bg-amber-500 hover:bg-amber-600 text-white shadow-sm h-8 w-8"
+                    on:click={() => update(ver.updateFor || '', ver.number)}
+                    disabled={installing !== ''}
+                    title="{ver.updateFor} → {ver.number} — {$t('runtimes.updateHint')}"
+                  >
+                    {#if installing === ver.number}
+                      <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    {:else}
+                      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    {/if}
+                  </button>
+                {:else}
+                  <button
+                    class="btn-icon bg-blue-600 hover:bg-blue-700 text-white shadow-sm h-8 w-8"
+                    on:click={() => install(ver.number)}
+                    disabled={installing !== ''}
+                    title={$t('runtimes.install')}
+                  >
+                    {#if installing === ver.number}
+                      <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    {:else}
+                      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    {/if}
+                  </button>
+                {/if}
               {/if}
             </div>
           {/each}
@@ -606,3 +812,14 @@
     </div>
   </div>
 </div>
+
+<ConfirmDialog
+  open={pendingUninstall !== null}
+  danger={true}
+  busy={uninstallingVersion !== null}
+  title={pendingUninstall ? $t('runtimes.confirmUninstallTitle', activeTab, pendingUninstall) : ''}
+  message={$t('runtimes.confirmUninstallMsg')}
+  confirmLabel={uninstallingVersion ? $t('runtimes.uninstalling') : $t('runtimes.uninstall')}
+  on:confirm={confirmUninstall}
+  on:cancel={cancelUninstall}
+/>

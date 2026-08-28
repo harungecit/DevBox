@@ -10,12 +10,20 @@ export function AddToPATH(arg1) {
   return window['go']['main']['App']['AddToPATH'](arg1);
 }
 
+export function CheckForUpdate() {
+  return window['go']['main']['App']['CheckForUpdate']();
+}
+
 export function CheckPort(arg1) {
   return window['go']['main']['App']['CheckPort'](arg1);
 }
 
 export function CloneGitProject(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CloneGitProject'](arg1, arg2, arg3, arg4);
+}
+
+export function ConfigureCloudflare(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['ConfigureCloudflare'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function DetectExternalDBTools() {
@@ -26,8 +34,36 @@ export function DetectFramework(arg1) {
   return window['go']['main']['App']['DetectFramework'](arg1);
 }
 
+export function DisablePnpm() {
+  return window['go']['main']['App']['DisablePnpm']();
+}
+
+export function DisableYarn() {
+  return window['go']['main']['App']['DisableYarn']();
+}
+
+export function DisconnectCloudflare() {
+  return window['go']['main']['App']['DisconnectCloudflare']();
+}
+
+export function EnablePnpm() {
+  return window['go']['main']['App']['EnablePnpm']();
+}
+
+export function EnableYarn() {
+  return window['go']['main']['App']['EnableYarn']();
+}
+
+export function GetAdminerURL() {
+  return window['go']['main']['App']['GetAdminerURL']();
+}
+
 export function GetAllServices() {
   return window['go']['main']['App']['GetAllServices']();
+}
+
+export function GetAppVersion() {
+  return window['go']['main']['App']['GetAppVersion']();
 }
 
 export function GetAutoStartServices() {
@@ -46,12 +82,24 @@ export function GetBunVersion() {
   return window['go']['main']['App']['GetBunVersion']();
 }
 
+export function GetCloudflareStatus() {
+  return window['go']['main']['App']['GetCloudflareStatus']();
+}
+
 export function GetComposerVersion() {
   return window['go']['main']['App']['GetComposerVersion']();
 }
 
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
+}
+
+export function GetDataDir() {
+  return window['go']['main']['App']['GetDataDir']();
+}
+
+export function GetDefaultProjectsDir() {
+  return window['go']['main']['App']['GetDefaultProjectsDir']();
 }
 
 export function GetDevServerLogs(arg1, arg2) {
@@ -62,6 +110,10 @@ export function GetGlobalRuntime(arg1) {
   return window['go']['main']['App']['GetGlobalRuntime'](arg1);
 }
 
+export function GetInstalledCounts() {
+  return window['go']['main']['App']['GetInstalledCounts']();
+}
+
 export function GetInstalledRuntimes() {
   return window['go']['main']['App']['GetInstalledRuntimes']();
 }
@@ -70,24 +122,72 @@ export function GetInstalledVersions(arg1) {
   return window['go']['main']['App']['GetInstalledVersions'](arg1);
 }
 
+export function GetLastUpdateCheck() {
+  return window['go']['main']['App']['GetLastUpdateCheck']();
+}
+
 export function GetLocale(arg1) {
   return window['go']['main']['App']['GetLocale'](arg1);
+}
+
+export function GetMigrationNotice() {
+  return window['go']['main']['App']['GetMigrationNotice']();
+}
+
+export function GetNpmLatestVersion() {
+  return window['go']['main']['App']['GetNpmLatestVersion']();
+}
+
+export function GetNpmVersion() {
+  return window['go']['main']['App']['GetNpmVersion']();
 }
 
 export function GetPATHEntries() {
   return window['go']['main']['App']['GetPATHEntries']();
 }
 
+export function GetPHPCGIInstances() {
+  return window['go']['main']['App']['GetPHPCGIInstances']();
+}
+
 export function GetPHPExtensions(arg1) {
   return window['go']['main']['App']['GetPHPExtensions'](arg1);
+}
+
+export function GetPHPIniPath(arg1) {
+  return window['go']['main']['App']['GetPHPIniPath'](arg1);
+}
+
+export function GetPHPIniSettings(arg1) {
+  return window['go']['main']['App']['GetPHPIniSettings'](arg1);
+}
+
+export function GetPeclExtensions(arg1) {
+  return window['go']['main']['App']['GetPeclExtensions'](arg1);
+}
+
+export function GetPnpmVersion() {
+  return window['go']['main']['App']['GetPnpmVersion']();
 }
 
 export function GetProjectVhostPath(arg1) {
   return window['go']['main']['App']['GetProjectVhostPath'](arg1);
 }
 
+export function GetProxyLogPath() {
+  return window['go']['main']['App']['GetProxyLogPath']();
+}
+
+export function GetProxyStatus() {
+  return window['go']['main']['App']['GetProxyStatus']();
+}
+
 export function GetRemoteVersions(arg1) {
   return window['go']['main']['App']['GetRemoteVersions'](arg1);
+}
+
+export function GetRemoteVersionsInfo(arg1, arg2) {
+  return window['go']['main']['App']['GetRemoteVersionsInfo'](arg1, arg2);
 }
 
 export function GetRunningDevServers() {
@@ -96,6 +196,10 @@ export function GetRunningDevServers() {
 
 export function GetRunningTunnels() {
   return window['go']['main']['App']['GetRunningTunnels']();
+}
+
+export function GetRuntimeUpdates(arg1) {
+  return window['go']['main']['App']['GetRuntimeUpdates'](arg1);
 }
 
 export function GetServiceDetails(arg1) {
@@ -122,8 +226,20 @@ export function GetWebServerPort() {
   return window['go']['main']['App']['GetWebServerPort']();
 }
 
+export function GetYarnVersion() {
+  return window['go']['main']['App']['GetYarnVersion']();
+}
+
+export function HideToTray() {
+  return window['go']['main']['App']['HideToTray']();
+}
+
 export function InstallAdminer() {
   return window['go']['main']['App']['InstallAdminer']();
+}
+
+export function InstallAppUpdate() {
+  return window['go']['main']['App']['InstallAppUpdate']();
 }
 
 export function InstallBun() {
@@ -138,6 +254,14 @@ export function InstallComposer() {
   return window['go']['main']['App']['InstallComposer']();
 }
 
+export function InstallPeclExtension(arg1, arg2) {
+  return window['go']['main']['App']['InstallPeclExtension'](arg1, arg2);
+}
+
+export function InstallProxy() {
+  return window['go']['main']['App']['InstallProxy']();
+}
+
 export function InstallRuntime(arg1, arg2) {
   return window['go']['main']['App']['InstallRuntime'](arg1, arg2);
 }
@@ -148,6 +272,14 @@ export function InstallService(arg1, arg2, arg3) {
 
 export function IsAdminerInstalled() {
   return window['go']['main']['App']['IsAdminerInstalled']();
+}
+
+export function IsAdminerServerRunning() {
+  return window['go']['main']['App']['IsAdminerServerRunning']();
+}
+
+export function IsAutoStartEnabled() {
+  return window['go']['main']['App']['IsAutoStartEnabled']();
 }
 
 export function IsBunInstalled() {
@@ -174,8 +306,16 @@ export function IsPHPCGIRunning() {
   return window['go']['main']['App']['IsPHPCGIRunning']();
 }
 
+export function IsPnpmEnabled() {
+  return window['go']['main']['App']['IsPnpmEnabled']();
+}
+
 export function IsTunnelRunning(arg1) {
   return window['go']['main']['App']['IsTunnelRunning'](arg1);
+}
+
+export function IsYarnEnabled() {
+  return window['go']['main']['App']['IsYarnEnabled']();
 }
 
 export function LaunchExternalTool(arg1, arg2) {
@@ -184,6 +324,14 @@ export function LaunchExternalTool(arg1, arg2) {
 
 export function ListProjects() {
   return window['go']['main']['App']['ListProjects']();
+}
+
+export function OpenAdminer() {
+  return window['go']['main']['App']['OpenAdminer']();
+}
+
+export function OpenDataDir() {
+  return window['go']['main']['App']['OpenDataDir']();
 }
 
 export function OpenFileInEditor(arg1) {
@@ -198,12 +346,36 @@ export function OpenProjectFolder(arg1) {
   return window['go']['main']['App']['OpenProjectFolder'](arg1);
 }
 
+export function Quit() {
+  return window['go']['main']['App']['Quit']();
+}
+
+export function RefreshAllVersions() {
+  return window['go']['main']['App']['RefreshAllVersions']();
+}
+
+export function RefreshServiceVersions(arg1) {
+  return window['go']['main']['App']['RefreshServiceVersions'](arg1);
+}
+
+export function RegenerateVhosts() {
+  return window['go']['main']['App']['RegenerateVhosts']();
+}
+
+export function ReloadProxy() {
+  return window['go']['main']['App']['ReloadProxy']();
+}
+
 export function RemoveFromPATH(arg1) {
   return window['go']['main']['App']['RemoveFromPATH'](arg1);
 }
 
 export function RemoveProject(arg1) {
   return window['go']['main']['App']['RemoveProject'](arg1);
+}
+
+export function RestartPHPCGI() {
+  return window['go']['main']['App']['RestartPHPCGI']();
 }
 
 export function RestartService(arg1) {
@@ -226,6 +398,10 @@ export function SetAutoStart(arg1) {
   return window['go']['main']['App']['SetAutoStart'](arg1);
 }
 
+export function SetCloseToTray(arg1) {
+  return window['go']['main']['App']['SetCloseToTray'](arg1);
+}
+
 export function SetGlobalRuntime(arg1, arg2) {
   return window['go']['main']['App']['SetGlobalRuntime'](arg1, arg2);
 }
@@ -234,12 +410,32 @@ export function SetLanguage(arg1) {
   return window['go']['main']['App']['SetLanguage'](arg1);
 }
 
+export function SetPHPIniSetting(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetPHPIniSetting'](arg1, arg2, arg3);
+}
+
 export function SetProjectPort(arg1, arg2) {
   return window['go']['main']['App']['SetProjectPort'](arg1, arg2);
 }
 
+export function SetProjectPublicHostname(arg1, arg2) {
+  return window['go']['main']['App']['SetProjectPublicHostname'](arg1, arg2);
+}
+
+export function SetProjectRuntime(arg1, arg2) {
+  return window['go']['main']['App']['SetProjectRuntime'](arg1, arg2);
+}
+
+export function SetProjectRuntimeVersion(arg1, arg2) {
+  return window['go']['main']['App']['SetProjectRuntimeVersion'](arg1, arg2);
+}
+
 export function SetProjectStartCommand(arg1, arg2) {
   return window['go']['main']['App']['SetProjectStartCommand'](arg1, arg2);
+}
+
+export function SetProjectWebserver(arg1, arg2) {
+  return window['go']['main']['App']['SetProjectWebserver'](arg1, arg2);
 }
 
 export function SetServiceAutoStart(arg1, arg2) {
@@ -248,6 +444,10 @@ export function SetServiceAutoStart(arg1, arg2) {
 
 export function SetServicePort(arg1, arg2) {
   return window['go']['main']['App']['SetServicePort'](arg1, arg2);
+}
+
+export function SetStartMinimized(arg1) {
+  return window['go']['main']['App']['SetStartMinimized'](arg1);
 }
 
 export function SetTheme(arg1) {
@@ -270,6 +470,10 @@ export function StartPHPCGI(arg1, arg2) {
   return window['go']['main']['App']['StartPHPCGI'](arg1, arg2);
 }
 
+export function StartProxy() {
+  return window['go']['main']['App']['StartProxy']();
+}
+
 export function StartService(arg1) {
   return window['go']['main']['App']['StartService'](arg1);
 }
@@ -278,12 +482,20 @@ export function StartTunnel(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['StartTunnel'](arg1, arg2, arg3, arg4);
 }
 
+export function StopAdminerServer() {
+  return window['go']['main']['App']['StopAdminerServer']();
+}
+
 export function StopDevServer(arg1) {
   return window['go']['main']['App']['StopDevServer'](arg1);
 }
 
 export function StopPHPCGI() {
   return window['go']['main']['App']['StopPHPCGI']();
+}
+
+export function StopProxy() {
+  return window['go']['main']['App']['StopProxy']();
 }
 
 export function StopService(arg1) {
@@ -302,8 +514,20 @@ export function ToggleProjectSSL(arg1, arg2) {
   return window['go']['main']['App']['ToggleProjectSSL'](arg1, arg2);
 }
 
+export function UninstallAdminer() {
+  return window['go']['main']['App']['UninstallAdminer']();
+}
+
 export function UninstallBun() {
   return window['go']['main']['App']['UninstallBun']();
+}
+
+export function UninstallPeclExtension(arg1, arg2) {
+  return window['go']['main']['App']['UninstallPeclExtension'](arg1, arg2);
+}
+
+export function UninstallProxy() {
+  return window['go']['main']['App']['UninstallProxy']();
 }
 
 export function UninstallRuntime(arg1, arg2) {
@@ -312,4 +536,20 @@ export function UninstallRuntime(arg1, arg2) {
 
 export function UninstallService(arg1) {
   return window['go']['main']['App']['UninstallService'](arg1);
+}
+
+export function UpdateNpm() {
+  return window['go']['main']['App']['UpdateNpm']();
+}
+
+export function UpdateRuntime(arg1, arg2, arg3) {
+  return window['go']['main']['App']['UpdateRuntime'](arg1, arg2, arg3);
+}
+
+export function UpdateService(arg1, arg2) {
+  return window['go']['main']['App']['UpdateService'](arg1, arg2);
+}
+
+export function VerifyCloudflareToken(arg1) {
+  return window['go']['main']['App']['VerifyCloudflareToken'](arg1);
 }

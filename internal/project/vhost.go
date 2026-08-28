@@ -1,6 +1,7 @@
 package project
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -115,8 +116,9 @@ server {
 }
 
 // GenerateApacheVhost creates an Apache vhost config for a project.
-// httpPort is the Apache listen port. If 0, defaults to 80.
-func GenerateApacheVhost(project Project, httpPort int) error {
+// httpPort is the Apache listen port. If 0, defaults to 80. phpCgiPort > 0
+// routes *.php through mod_proxy_fcgi to that php-cgi instance.
+func GenerateApacheVhost(project Project, httpPort int, phpCgiPort int) error {
 	base := filepath.Join(config.GetDataDir(), "services", "apache")
 	vhostDir := filepath.Join(base, "conf", "extra")
 	os.MkdirAll(vhostDir, 0755)
@@ -144,21 +146,36 @@ func GenerateApacheVhost(project Project, httpPort int) error {
 </VirtualHost>
 `, project.Name, httpPort, project.Domain, project.Port, project.Port)
 	} else {
+		phpBlock := ""
+		if phpCgiPort > 0 {
+			phpBlock = fmt.Sprintf(`
+    <FilesMatch "\.php$">
+        SetHandler "proxy:fcgi://127.0.0.1:%d"
+    </FilesMatch>
+    DirectoryIndex index.php index.html
+`, phpCgiPort)
+		}
 		conf = fmt.Sprintf(`# DevBox generated vhost for %s
 <VirtualHost *:%d>
     ServerName %s
     DocumentRoot "%s"
-
+%s
     <Directory "%s">
         Options Indexes FollowSymLinks
         AllowOverride All
         Require all granted
     </Directory>
 </VirtualHost>
-`, project.Name, httpPort, project.Domain, docRoot, docRoot)
+`, project.Name, httpPort, project.Domain, docRoot, phpBlock, docRoot)
 	}
 
 	return os.WriteFile(confPath, []byte(conf), 0644)
+}
+
+// RemoveApacheVhost removes a project's Apache vhost config.
+func RemoveApacheVhost(projectName string) {
+	base := filepath.Join(config.GetDataDir(), "services", "apache")
+	os.Remove(filepath.Join(base, "conf", "extra", "vhost-"+projectName+".conf"))
 }
 
 // GenerateCaddyVhost creates a Caddy site block for a project
@@ -208,4 +225,79 @@ func GenerateCaddyVhost(project Project, phpCgiPort int) error {
 func RemoveNginxVhost(projectName string) {
 	base := filepath.Join(config.GetDataDir(), "services", "nginx")
 	os.Remove(filepath.Join(base, "conf", "vhosts", projectName+".conf"))
+}
+
+// GenerateFrankenPHPVhost writes a per-project Caddyfile fragment for FrankenPHP.
+// Files land in ~/.devbox/services/frankenphp/vhosts/<name>.caddy and are
+// picked up by the main Caddyfile via `import vhosts/*.caddy`.
+//
+// FrankenPHP serves PHP using its bundled runtime via the `php_server`
+// directive — no external php-fpm/php-cgi is needed. App-server projects
+// (Node/Go/etc.) get a reverse_proxy block, the same shape we use for Caddy.
+func GenerateFrankenPHPVhost(p Project) error {
+	if p.Domain == "" {
+		return nil
+	}
+	base := filepath.Join(config.GetDataDir(), "services", "frankenphp")
+	vhostDir := filepath.Join(base, "vhosts")
+	if err := os.MkdirAll(vhostDir, 0755); err != nil {
+		return err
+	}
+
+	docRoot := strings.ReplaceAll(p.Path, "\\", "/")
+	publicDir := filepath.Join(p.Path, "public")
+	if _, err := os.Stat(publicDir); err == nil {
+		docRoot = strings.ReplaceAll(publicDir, "\\", "/")
+	}
+
+	listen := fmt.Sprintf(":%d", frankenphpListenPort())
+	addr := fmt.Sprintf("http://%s%s", p.Domain, listen)
+
+	var conf string
+	if IsAppServer(p.Framework) && p.Port > 0 {
+		conf = fmt.Sprintf(`# DevBox FrankenPHP vhost for %s (reverse proxy to dev server)
+%s {
+	reverse_proxy 127.0.0.1:%d
+}
+`, p.Name, addr, p.Port)
+	} else {
+		// PHP / static: serve files; php_server enables PHP via FrankenPHP's bundled runtime.
+		conf = fmt.Sprintf(`# DevBox FrankenPHP vhost for %s
+%s {
+	root * %s
+	encode gzip
+	php_server
+}
+`, p.Name, addr, docRoot)
+	}
+
+	confPath := filepath.Join(vhostDir, p.Name+".caddy")
+	return os.WriteFile(confPath, []byte(conf), 0644)
+}
+
+// RemoveFrankenPHPVhost removes a project's FrankenPHP vhost fragment.
+func RemoveFrankenPHPVhost(projectName string) {
+	base := filepath.Join(config.GetDataDir(), "services", "frankenphp")
+	os.Remove(filepath.Join(base, "vhosts", projectName+".caddy"))
+}
+
+// frankenphpListenPort reads the FrankenPHP service's current port from its
+// saved config. Defaults to 8501 if anything is missing — matches the
+// service manager's DefaultPort and keeps vhosts consistent with the bind.
+func frankenphpListenPort() int {
+	// Minimal read of services/frankenphp/devbox-service.json without importing
+	// the service package to avoid a cycle.
+	type svcCfg struct {
+		Port int `json:"port"`
+	}
+	cfgPath := filepath.Join(config.GetDataDir(), "services", "frankenphp", "devbox-service.json")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return 8501
+	}
+	var c svcCfg
+	if json.Unmarshal(data, &c) != nil || c.Port <= 0 {
+		return 8501
+	}
+	return c.Port
 }

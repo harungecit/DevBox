@@ -7,9 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"sort"
 	"strconv"
 	"strings"
+
+	"DevBox/internal/platform"
 )
 
 const pythonFTPURL = "https://www.python.org/ftp/python/"
@@ -107,6 +110,13 @@ func (p *PythonManager) ListInstalled() ([]Version, error) {
 }
 
 func (p *PythonManager) Install(version string, progress chan<- Progress) error {
+	if goruntime.GOOS == "darwin" {
+		return p.installDarwin(version, progress)
+	}
+	return p.installWindows(version, progress)
+}
+
+func (p *PythonManager) installWindows(version string, progress chan<- Progress) error {
 	destDir := filepath.Join(runtimeBaseDir("python"), version)
 	if _, err := os.Stat(destDir); err == nil {
 		return fmt.Errorf("Python %s is already installed", version)
@@ -154,6 +164,82 @@ func (p *PythonManager) Install(version string, progress chan<- Progress) error 
 	return nil
 }
 
+func (p *PythonManager) installDarwin(version string, progress chan<- Progress) error {
+	destDir := filepath.Join(runtimeBaseDir("python"), version)
+	if _, err := os.Stat(destDir); err == nil {
+		return fmt.Errorf("Python %s is already installed", version)
+	}
+
+	// Download from indygreg/python-build-standalone
+	downloadURL, filename, err := p.findDarwinURL(version)
+	if err != nil {
+		return err
+	}
+
+	tmpFile := filepath.Join(tmpDir(), filename)
+	if err := DownloadFile(downloadURL, tmpFile, 0, progress); err != nil {
+		return err
+	}
+
+	tmpExtract := filepath.Join(tmpDir(), fmt.Sprintf("python-%s-extract", version))
+	os.RemoveAll(tmpExtract)
+
+	if err := ExtractTarGz(tmpFile, tmpExtract, progress); err != nil {
+		os.Remove(tmpFile)
+		return err
+	}
+
+	// python-build-standalone extracts to python/
+	extractedDir := filepath.Join(tmpExtract, "python")
+	if _, err := os.Stat(extractedDir); os.IsNotExist(err) {
+		// Fallback: find single directory
+		entries, _ := os.ReadDir(tmpExtract)
+		if len(entries) == 1 && entries[0].IsDir() {
+			extractedDir = filepath.Join(tmpExtract, entries[0].Name())
+		} else {
+			extractedDir = tmpExtract
+		}
+	}
+
+	os.MkdirAll(filepath.Dir(destDir), 0755)
+	if err := os.Rename(extractedDir, destDir); err != nil {
+		return fmt.Errorf("failed to move Python: %w", err)
+	}
+
+	os.Remove(tmpFile)
+	os.RemoveAll(tmpExtract)
+
+	if progress != nil {
+		progress <- Progress{Percent: 100, Message: "Python " + version + " installed"}
+	}
+	return nil
+}
+
+func (p *PythonManager) findDarwinURL(version string) (string, string, error) {
+	releases, err := FetchGitHubReleasesPublic("indygreg", "python-build-standalone")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to fetch python-build-standalone releases: %w", err)
+	}
+
+	arch := goruntime.GOARCH
+	if arch == "arm64" {
+		arch = "aarch64"
+	}
+	suffix := fmt.Sprintf("%s-apple-darwin-install_only.tar.gz", arch)
+
+	versionPrefix := fmt.Sprintf("cpython-%s", version)
+
+	for _, rel := range releases {
+		for _, asset := range rel.Assets {
+			if strings.HasPrefix(asset.Name, versionPrefix) && strings.HasSuffix(asset.Name, suffix) {
+				return asset.BrowserDownloadURL, asset.Name, nil
+			}
+		}
+	}
+
+	return "", "", fmt.Errorf("Python %s not found for macOS/%s at python-build-standalone", version, goruntime.GOARCH)
+}
+
 func (p *PythonManager) Uninstall(version string) error {
 	global, _ := p.GetGlobal()
 	if global == version {
@@ -175,8 +261,11 @@ func (p *PythonManager) GetGlobal() (string, error) {
 }
 
 func (p *PythonManager) BinaryPath(version string) string {
-	// Python embeddable has python.exe directly in the root
-	return filepath.Join(runtimeBaseDir("python"), version)
+	if goruntime.GOOS == "windows" {
+		// Python embeddable has python.exe directly in the root
+		return filepath.Join(runtimeBaseDir("python"), version)
+	}
+	return filepath.Join(runtimeBaseDir("python"), version, "bin")
 }
 
 // enableSitePackages uncomments "import site" in the ._pth file to enable pip/site-packages
@@ -200,7 +289,7 @@ func (p *PythonManager) installPip(destDir string) {
 	}
 
 	// Run python get-pip.py
-	pythonExe := filepath.Join(destDir, "python.exe")
+	pythonExe := filepath.Join(destDir, platform.BinaryName("python"))
 	cmd := execCommand(pythonExe, getPipPath)
 	cmd.Dir = destDir
 	cmd.Run()

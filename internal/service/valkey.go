@@ -3,16 +3,21 @@ package service
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
+
+	"DevBox/internal/platform"
 )
 
 const valkeyMaxVersions = 5
 
-var valkeyKnownVersions = []AvailableVersion{
-	{Version: "8.1.1", Label: "8.1.1 (Latest)", URL: "https://github.com/nicenemo/valkey-windows/releases/download/v8.1.1/valkey-8.1.1-windows-x86_64.zip"},
-	{Version: "8.0.2", Label: "8.0.2", URL: "https://github.com/nicenemo/valkey-windows/releases/download/v8.0.2/valkey-8.0.2-windows-x86_64.zip"},
-}
+// errValkeyNoWindowsSupport is returned when listing/installing Valkey on Windows.
+// Valkey upstream does not publish Windows binaries, and the only community port
+// (nicenemo/valkey-windows) was removed in 2025. Redis is API-compatible and works
+// as a drop-in replacement on Windows via DevBox's Redis service.
+var errValkeyNoWindowsSupport = fmt.Errorf("Valkey has no official or maintained community Windows build. Use Redis instead — it is API-compatible with Valkey on Windows")
 
 type ValkeyManager struct{}
 
@@ -23,22 +28,32 @@ func (v *ValkeyManager) DisplayName() string  { return "Valkey" }
 func (v *ValkeyManager) DefaultPort() int     { return 6379 }
 
 func (v *ValkeyManager) IsInstalled() bool {
-	_, err := os.Stat(filepath.Join(serviceBaseDir("valkey"), "valkey-server.exe"))
+	_, err := os.Stat(filepath.Join(serviceBaseDir("valkey"), platform.BinaryName("valkey-server")))
 	return err == nil
 }
 
 func (v *ValkeyManager) ListVersions() ([]AvailableVersion, error) {
-	versions, err := v.fetchVersions()
-	if err != nil || len(versions) == 0 {
-		return valkeyKnownVersions, nil
+	if goruntime.GOOS == "darwin" {
+		return v.listVersionsDarwin()
 	}
-	if len(versions) > valkeyMaxVersions {
-		versions = versions[:valkeyMaxVersions]
-	}
-	return versions, nil
+	return nil, errValkeyNoWindowsSupport
+}
+
+func (v *ValkeyManager) listVersionsDarwin() ([]AvailableVersion, error) {
+	return []AvailableVersion{
+		{Version: "8.1.1", Label: "8.1.1 (Latest)", URL: "https://github.com/valkey-io/valkey/archive/refs/tags/8.1.1.tar.gz"},
+		{Version: "8.0.2", Label: "8.0.2", URL: "https://github.com/valkey-io/valkey/archive/refs/tags/8.0.2.tar.gz"},
+	}, nil
 }
 
 func (v *ValkeyManager) Install(version string, port int, progress chan<- Progress) error {
+	if goruntime.GOOS == "darwin" {
+		return v.installDarwin(version, port, progress)
+	}
+	return v.installWindows(version, port, progress)
+}
+
+func (v *ValkeyManager) installWindows(version string, port int, progress chan<- Progress) error {
 	base := serviceBaseDir("valkey")
 
 	if port <= 0 {
@@ -80,14 +95,14 @@ func (v *ValkeyManager) Install(version string, port int, progress chan<- Progre
 	}
 	if extractedDir == "" {
 		// Files might be directly in tmpExtract
-		if _, err := os.Stat(filepath.Join(tmpExtract, "valkey-server.exe")); err == nil {
+		if _, err := os.Stat(filepath.Join(tmpExtract, platform.BinaryName("valkey-server"))); err == nil {
 			extractedDir = tmpExtract
 		} else {
 			return fmt.Errorf("Valkey directory not found after extraction")
 		}
 	}
 
-	if _, err := os.Stat(filepath.Join(extractedDir, "valkey-server.exe")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(extractedDir, platform.BinaryName("valkey-server"))); os.IsNotExist(err) {
 		return fmt.Errorf("valkey-server.exe not found in extracted files")
 	}
 
@@ -102,6 +117,81 @@ func (v *ValkeyManager) Install(version string, port int, progress chan<- Progre
 
 	if err := moveDir(extractedDir, base); err != nil {
 		return fmt.Errorf("failed to install Valkey: %w", err)
+	}
+
+	os.MkdirAll(filepath.Join(base, "logs"), 0755)
+	os.MkdirAll(filepath.Join(base, "data"), 0755)
+
+	v.writeConfig(port)
+	SaveServiceConfig("valkey", ServiceConfig{Port: port, Version: version})
+
+	if progress != nil {
+		progress <- Progress{Percent: 100, Message: fmt.Sprintf("Valkey %s installed (port %d)", version, port)}
+	}
+	return nil
+}
+
+func (v *ValkeyManager) installDarwin(version string, port int, progress chan<- Progress) error {
+	base := serviceBaseDir("valkey")
+	if port <= 0 {
+		port = v.DefaultPort()
+	}
+
+	filename := fmt.Sprintf("valkey-%s.tar.gz", version)
+	downloadURL := fmt.Sprintf("https://github.com/valkey-io/valkey/archive/refs/tags/%s.tar.gz", version)
+
+	tmpFile, err := downloadToTmp(downloadURL, filename, progress)
+	if err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+	defer os.Remove(tmpFile)
+
+	if progress != nil {
+		progress <- Progress{Percent: 50, Message: "Extracting source..."}
+	}
+
+	tmpExtract := tmpFile + "-extract"
+	os.RemoveAll(tmpExtract)
+	defer os.RemoveAll(tmpExtract)
+
+	if err := extractTarGz(tmpFile, tmpExtract); err != nil {
+		return fmt.Errorf("extraction failed: %w", err)
+	}
+
+	srcDir := filepath.Join(tmpExtract, fmt.Sprintf("valkey-%s", version))
+	if _, err := os.Stat(srcDir); os.IsNotExist(err) {
+		entries, _ := os.ReadDir(tmpExtract)
+		for _, e := range entries {
+			if e.IsDir() && strings.HasPrefix(strings.ToLower(e.Name()), "valkey") {
+				srcDir = filepath.Join(tmpExtract, e.Name())
+				break
+			}
+		}
+	}
+
+	if progress != nil {
+		progress <- Progress{Percent: 60, Message: "Compiling Valkey (this may take a minute)..."}
+	}
+
+	makeCmd := exec.Command("make")
+	makeCmd.Dir = srcDir
+	if out, err := makeCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("make failed: %s - %w", string(out), err)
+	}
+
+	if err := removeBaseDir(base); err != nil {
+		return fmt.Errorf("failed to clean old installation: %w", err)
+	}
+	os.MkdirAll(base, 0755)
+
+	// Copy built binaries from src/ to base dir
+	srcBin := filepath.Join(srcDir, "src")
+	for _, bin := range []string{"valkey-server", "valkey-cli", "valkey-benchmark"} {
+		src := filepath.Join(srcBin, bin)
+		dst := filepath.Join(base, bin)
+		if data, err := os.ReadFile(src); err == nil {
+			os.WriteFile(dst, data, 0755)
+		}
 	}
 
 	os.MkdirAll(filepath.Join(base, "logs"), 0755)
@@ -137,7 +227,7 @@ func (v *ValkeyManager) Start() error {
 	}
 
 	base := serviceBaseDir("valkey")
-	exe := filepath.Join(base, "valkey-server.exe")
+	exe := filepath.Join(base, platform.BinaryName("valkey-server"))
 	confFile := filepath.Join(base, "valkey.conf")
 	logFile := filepath.Join(base, "logs", "valkey.log")
 
@@ -231,20 +321,9 @@ maxmemory-policy allkeys-lru
 }
 
 func (v *ValkeyManager) findDownloadURL(version string) (string, error) {
-	for _, kv := range valkeyKnownVersions {
-		if kv.Version == version {
-			return kv.URL, nil
-		}
-	}
-	versions, err := v.fetchVersions()
-	if err == nil {
-		for _, kv := range versions {
-			if kv.Version == version {
-				return kv.URL, nil
-			}
-		}
-	}
-	return fmt.Sprintf("https://github.com/nicenemo/valkey-windows/releases/download/v%s/valkey-%s-windows-x86_64.zip", version, version), nil
+	// Windows path is unreachable now (ListVersions errors out), but kept defensive
+	// in case Install is called with a stale version string.
+	return "", errValkeyNoWindowsSupport
 }
 
 func (v *ValkeyManager) fetchVersions() ([]AvailableVersion, error) {

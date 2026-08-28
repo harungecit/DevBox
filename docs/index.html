@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DevBox — Local development environments, batteries included</title>
+<meta name="description" content="DevBox is a free, open-source desktop app for Windows that installs and manages Go, Node.js, PHP, Python, Rust and the services around them — Nginx, PostgreSQL, MySQL, Redis, Mailpit — with .test domains, SSL and Cloudflare tunnels in one click.">
+<meta property="og:title" content="DevBox — Local development environments, batteries included">
+<meta property="og:description" content="Runtimes, services, domains, SSL and tunnels for local development. One app. Zero yak-shaving.">
+<meta property="og:image" content="https://harungecit.github.io/DevBox/assets/icon.png">
+<link rel="icon" href="assets/icon.png">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js" defer></script>
+</head>
+<body>
+<header><div class="wrap nav">
+  <a class="brand" href="./"><img src="assets/icon.png" alt="">DevBox</a>
+  <div class="links">
+    <a href="#features"><span data-lang="en">Features</span><span data-lang="tr">Özellikler</span></a>
+    <a href="#install"><span data-lang="en">Install</span><span data-lang="tr">Kurulum</span></a>
+    <a href="#usage"><span data-lang="en">Guide</span><span data-lang="tr">Kılavuz</span></a>
+    <a href="#faq">FAQ</a>
+    <a href="https://github.com/harungecit/DevBox">GitHub</a>
+    <div class="lang"><button data-set="en">EN</button><button data-set="tr">TR</button></div>
+  </div>
+</div></header>
+
+<main class="wrap">
+  <div class="hero">
+    <div>
+      <span class="eyebrow"><span data-lang="en">Free &amp; open source · Windows</span><span data-lang="tr">Ücretsiz &amp; açık kaynak · Windows</span></span>
+      <h1 data-lang="en">Your whole local dev stack, <span>one click away.</span></h1>
+      <h1 data-lang="tr">Tüm yerel geliştirme ortamın, <span>tek tıkla hazır.</span></h1>
+      <p class="lead" data-lang="en">DevBox installs and runs Go, Node.js, PHP, Python and Rust — plus Nginx, PostgreSQL, MySQL, MariaDB, MongoDB, Redis and Mailpit — gives every project a <code>.test</code> domain with SSL, and shares it to the world through Cloudflare. No Docker, no PATH surgery, no yak-shaving.</p>
+      <p class="lead" data-lang="tr">DevBox; Go, Node.js, PHP, Python ve Rust'ı — yanında Nginx, PostgreSQL, MySQL, MariaDB, MongoDB, Redis ve Mailpit'i — kurar ve çalıştırır, her projeye SSL'li bir <code>.test</code> alan adı verir ve Cloudflare üzerinden dünyaya açar. Docker yok, PATH ile uğraşmak yok, vakit kaybı yok.</p>
+      <div class="cta">
+        <a id="dl-win" class="btn primary" href="https://github.com/harungecit/DevBox/releases/latest">⬇ <span data-lang="en">Download for Windows</span><span data-lang="tr">Windows için indir</span> <span id="dl-ver" class="tiny" style="color:#fff;opacity:.8"></span></a>
+        <span class="btn soon"> <span data-lang="en">macOS — coming soon</span><span data-lang="tr">macOS — yakında</span></span>
+      </div>
+      <p class="tiny" data-lang="en">Windows 10/11 · 64-bit · MIT licensed · no telemetry</p>
+      <p class="tiny" data-lang="tr">Windows 10/11 · 64-bit · MIT lisanslı · telemetri yok</p>
+    </div>
+    <div class="shot" aria-hidden="true">
+      <div class="bar"><i></i><i></i><i></i></div>
+      <div class="row"><span>nginx 1.28.2</span><span class="pill ok">running · :80</span></div>
+      <div class="row"><span>postgresql 18.2</span><span class="pill ok">running · :5432</span></div>
+      <div class="row"><span>redis 8.6.3</span><span class="pill warn">→ 8.6.4</span></div>
+      <div class="row"><span>php 8.4.16 · fastcgi :9000</span><span class="pill info">active</span></div>
+      <div class="row"><span>node 24.19.0</span><span class="pill info">active</span></div>
+      <div class="row"><span>myapp.test → https</span><span class="pill ok">ssl · tunnel</span></div>
+    </div>
+  </div>
+
+  <section id="features">
+    <h2 data-lang="en">Everything a local environment needs</h2>
+    <h2 data-lang="tr">Yerel bir ortamın ihtiyaç duyduğu her şey</h2>
+    <p class="sub" data-lang="en">Built for people who'd rather ship than configure. Every default is tuned for development out of the box.</p>
+    <p class="sub" data-lang="tr">Yapılandırmak yerine üretmek isteyenler için. Her varsayılan, kutudan çıktığı gibi geliştirmeye göre ayarlı.</p>
+    <div class="grid">
+      <div class="card"><div class="icon">⚙</div><h3 data-lang="en">Runtimes, side by side</h3><h3 data-lang="tr">Yan yana çalışma zamanları</h3><p data-lang="en">Install any version of Go, Node.js, PHP, Python or Rust. Switch the global one, pin a different one per project. Minor/patch releases update in place and carry your settings over.</p><p data-lang="tr">Go, Node.js, PHP, Python veya Rust'ın istediğiniz sürümünü kurun. Global sürümü değiştirin, projeye özel farklı bir sürüm sabitleyin. Minör/patch sürümler yerinde güncellenir, ayarlarınız korunur.</p></div>
+      <div class="card"><div class="icon">🗄</div><h3 data-lang="en">Services in one click</h3><h3 data-lang="tr">Tek tıkla servisler</h3><p data-lang="en">Nginx, Apache, Caddy, FrankenPHP, PostgreSQL, MySQL, MariaDB, MongoDB, Redis, Mailpit — download, configure, start, auto-start. Port conflicts are detected before they bite.</p><p data-lang="tr">Nginx, Apache, Caddy, FrankenPHP, PostgreSQL, MySQL, MariaDB, MongoDB, Redis, Mailpit — indir, yapılandır, başlat, otomatik başlat. Port çakışmaları daha oluşmadan yakalanır.</p></div>
+      <div class="card"><div class="icon">🌐</div><h3 data-lang="en">.test domains &amp; SSL</h3><h3 data-lang="tr">.test alan adları &amp; SSL</h3><p data-lang="en">Add a project folder and get <code>myapp.test</code> with a trusted local certificate. A built-in front-door proxy routes every domain to the right backend — nginx, FrankenPHP or your dev server.</p><p data-lang="tr">Bir proje klasörü ekleyin, güvenilir yerel sertifikalı <code>myapp.test</code> hazır. Yerleşik ön kapı proxy'si her alan adını doğru arka uca yönlendirir — nginx, FrankenPHP veya kendi dev sunucunuz.</p></div>
+      <div class="card"><div class="icon">☁</div><h3 data-lang="en">Share with a tunnel</h3><h3 data-lang="tr">Tünelle paylaş</h3><p data-lang="en">One click gives you a public URL via Cloudflare. Link your own account and expose projects on your own domain — DNS and routing handled for you.</p><p data-lang="tr">Tek tıkla Cloudflare üzerinden genel bir URL. Kendi hesabınızı bağlayın, projeleri kendi alan adınızda yayınlayın — DNS ve yönlendirme sizin yerinize halledilir.</p></div>
+      <div class="card"><div class="icon">🐘</div><h3 data-lang="en">PHP that just works</h3><h3 data-lang="tr">Sorunsuz PHP</h3><p data-lang="en">Dev-tuned php.ini, common extensions on, Composer installed, one FastCGI instance per PHP version your projects use. PECL extensions like Xdebug, Redis, Imagick and MongoDB install with a click.</p><p data-lang="tr">Geliştirmeye ayarlı php.ini, yaygın eklentiler açık, Composer kurulu, projelerinizin kullandığı her PHP sürümü için ayrı FastCGI örneği. Xdebug, Redis, Imagick, MongoDB gibi PECL eklentileri tek tıkla kurulur.</p></div>
+      <div class="card"><div class="icon">📦</div><h3 data-lang="en">Scaffold or clone</h3><h3 data-lang="tr">Sıfırdan oluştur ya da klonla</h3><p data-lang="en">Start a Laravel, Symfony, WordPress, Next.js, Nuxt, Vue, React, Svelte, Angular, Go, Rust or Django project from a template, or clone a Git repo — domain and vhost included.</p><p data-lang="tr">Laravel, Symfony, WordPress, Next.js, Nuxt, Vue, React, Svelte, Angular, Go, Rust veya Django projesini şablondan başlatın ya da bir Git deposunu klonlayın — alan adı ve vhost dahil.</p></div>
+      <div class="card"><div class="icon">🧰</div><h3 data-lang="en">Tools included</h3><h3 data-lang="tr">Araçlar dahil</h3><p data-lang="en">Adminer for databases, npm/yarn/pnpm/Bun, Composer, mkcert, cloudflared — installed and kept on your PATH by DevBox.</p><p data-lang="tr">Veritabanları için Adminer, npm/yarn/pnpm/Bun, Composer, mkcert, cloudflared — DevBox tarafından kurulur ve PATH'inizde tutulur.</p></div>
+      <div class="card"><div class="icon">🔒</div><h3 data-lang="en">Yours, locally</h3><h3 data-lang="tr">Sizin, yerelde</h3><p data-lang="en">Everything lives in <code>C:\DevBox</code>. No accounts, no telemetry, no background daemons beyond the services you start. Runs in the tray, keeps services up until you quit.</p><p data-lang="tr">Her şey <code>C:\DevBox</code> altında. Hesap yok, telemetri yok, başlattığınız servisler dışında arka plan süreci yok. Tepside çalışır, siz çıkana kadar servisler ayakta kalır.</p></div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2 data-lang="en">Install in a minute</h2><h2 data-lang="tr">Bir dakikada kur</h2>
+    <p class="sub" data-lang="en">Windows 10 or 11, 64-bit. WebView2 is installed automatically if missing.</p>
+    <p class="sub" data-lang="tr">Windows 10 veya 11, 64-bit. WebView2 eksikse otomatik kurulur.</p>
+    <div class="steps">
+      <div class="step"><div><h3 data-lang="en">Download the installer</h3><h3 data-lang="tr">Kurulum dosyasını indir</h3><p data-lang="en">Grab <code>DevBox-Setup-x.y.z-windows-amd64.exe</code> from the <a href="https://github.com/harungecit/DevBox/releases/latest">latest release</a>. A portable zip is there too. Checksums are in <code>SHA256SUMS-windows.txt</code>.</p><p data-lang="tr"><a href="https://github.com/harungecit/DevBox/releases/latest">Son sürümden</a> <code>DevBox-Setup-x.y.z-windows-amd64.exe</code> dosyasını indirin. Taşınabilir zip de orada. Sağlama toplamları <code>SHA256SUMS-windows.txt</code> içinde.</p></div></div>
+      <div class="step"><div><h3 data-lang="en">If SmartScreen appears, choose “More info → Run anyway”</h3><h3 data-lang="tr">SmartScreen çıkarsa “Daha fazla bilgi → Yine de çalıştır” seçin</h3><p data-lang="en">DevBox is a young open-source project without a paid code-signing certificate yet, so Windows may show “Windows protected your PC”. Every build is produced by a public GitHub Actions workflow from the source you can read; verify the SHA-256 if you like. This warning disappears as the app builds reputation and once signing is in place.</p><p data-lang="tr">DevBox henüz ücretli bir kod imzalama sertifikası olmayan genç bir açık kaynak projesi; bu yüzden Windows “Windows bilgisayarınızı korudu” uyarısı gösterebilir. Her yapı, okuyabileceğiniz kaynak koddan herkese açık bir GitHub Actions iş akışıyla üretilir; isterseniz SHA-256'yı doğrulayın. Uygulama itibar kazandıkça ve imzalama devreye girdikçe bu uyarı kaybolur.</p></div></div>
+      <div class="step"><div><h3 data-lang="en">Run the installer</h3><h3 data-lang="tr">Kurulumu çalıştır</h3><p data-lang="en">DevBox installs per user, adds a Start-menu entry, and keeps all data in <code>C:\DevBox</code>. Updates are offered inside the app and install in place.</p><p data-lang="tr">DevBox kullanıcı bazında kurulur, Başlat menüsüne eklenir, tüm veriyi <code>C:\DevBox</code> altında tutar. Güncellemeler uygulama içinde sunulur ve yerinde kurulur.</p></div></div>
+    </div>
+  </section>
+
+  <section id="usage">
+    <h2 data-lang="en">Five-minute guide</h2><h2 data-lang="tr">Beş dakikalık kılavuz</h2>
+    <div class="steps">
+      <div class="step"><div><h3 data-lang="en">Install a runtime</h3><h3 data-lang="tr">Bir çalışma zamanı kur</h3><p data-lang="en"><b>Runtimes</b> → pick PHP 8.4 (or Node, Go…) → Install. The first version becomes global: it's on your PATH, it powers FastCGI, and projects use it unless pinned.</p><p data-lang="tr"><b>Çalışma Zamanları</b> → PHP 8.4 (veya Node, Go…) seç → Kur. İlk sürüm global olur: PATH'inizdedir, FastCGI'yi çalıştırır, sabitlenmedikçe projeler onu kullanır.</p></div></div>
+      <div class="step"><div><h3 data-lang="en">Install a web server and a database</h3><h3 data-lang="tr">Web sunucu ve veritabanı kur</h3><p data-lang="en"><b>Services</b> → Web Server → Nginx → Install. Same for PostgreSQL or MySQL. Turn on <b>AUTO</b> so they start with DevBox.</p><p data-lang="tr"><b>Servisler</b> → Web Sunucu → Nginx → Kur. PostgreSQL veya MySQL için de aynı. DevBox ile başlasınlar diye <b>OTO</b>'yu açın.</p></div></div>
+      <div class="step"><div><h3 data-lang="en">Enable the front-door</h3><h3 data-lang="tr">Ön kapıyı etkinleştir</h3><p data-lang="en"><b>Overview</b> → Front-door → Install → Start. It listens on port 80 and routes <code>*.test</code> to the right backend so you never type a port again.</p><p data-lang="tr"><b>Genel Bakış</b> → Front-door → Kur → Başlat. 80 portunu dinler ve <code>*.test</code> isteklerini doğru arka uca yönlendirir; bir daha port yazmazsınız.</p></div></div>
+      <div class="step"><div><h3 data-lang="en">Add a project</h3><h3 data-lang="tr">Proje ekle</h3><p data-lang="en"><b>Projects</b> → Add → existing folder, template, or Git URL. Click the globe icon to register <code>myapp.test</code> in your hosts file (one UAC prompt), flip <b>SSL</b> for https. Open in browser.</p><p data-lang="tr"><b>Projeler</b> → Ekle → mevcut klasör, şablon veya Git URL'si. Küre simgesine tıklayıp <code>myapp.test</code>'i hosts dosyasına kaydedin (bir UAC onayı), https için <b>SSL</b>'i açın. Tarayıcıda açın.</p></div></div>
+      <div class="step"><div><h3 data-lang="en">Share it</h3><h3 data-lang="tr">Paylaş</h3><p data-lang="en">Click the share icon for a public <code>*.trycloudflare.com</code> URL. For your own domain: <b>Settings → Cloudflare</b>, paste an API token, pick the zone, then set a public hostname in the project's settings.</p><p data-lang="tr">Paylaş simgesine tıklayın, genel bir <code>*.trycloudflare.com</code> URL'si alın. Kendi alan adınız için: <b>Ayarlar → Cloudflare</b>, API token yapıştırın, alan adını seçin, sonra proje ayarlarında genel alan adını girin.</p></div></div>
+    </div>
+    <div class="note ok" style="margin-top:20px">
+      <span data-lang="en"><b>Tip:</b> right-click the tray icon for Start all / Stop all / Quit. Closing the window keeps everything running.</span>
+      <span data-lang="tr"><b>İpucu:</b> tepsi simgesine sağ tıklayın: Tümünü başlat / Tümünü durdur / Çık. Pencereyi kapatmak her şeyi çalışır halde bırakır.</span>
+    </div>
+  </section>
+
+  <section id="faq">
+    <h2>FAQ</h2>
+    <details><summary data-lang="en">Is it really free?</summary><summary data-lang="tr">Gerçekten ücretsiz mi?</summary><p data-lang="en">Yes. MIT licensed, no account, no telemetry, no paid tier. The source is on GitHub.</p><p data-lang="tr">Evet. MIT lisanslı, hesap yok, telemetri yok, ücretli paket yok. Kaynak kodu GitHub'da.</p></details>
+    <details><summary data-lang="en">Where is my data?</summary><summary data-lang="tr">Verilerim nerede?</summary><p data-lang="en">Everything — runtimes, service data, configs, logs — lives under <code>C:\DevBox</code>. Uninstalling DevBox leaves that folder alone so you never lose a database by accident.</p><p data-lang="tr">Her şey — çalışma zamanları, servis verileri, yapılandırmalar, loglar — <code>C:\DevBox</code> altında. DevBox'ı kaldırmak bu klasöre dokunmaz; yanlışlıkla veritabanı kaybetmezsiniz.</p></details>
+    <details><summary data-lang="en">Does it need admin rights?</summary><summary data-lang="tr">Yönetici hakkı gerekiyor mu?</summary><p data-lang="en">Only for two things, each with a visible UAC prompt: writing <code>.test</code> entries to the hosts file, and (on first start) letting the front-door proxy bind port 80.</p><p data-lang="tr">Yalnızca iki şey için, her biri görünür bir UAC onayıyla: hosts dosyasına <code>.test</code> kayıtlarını yazmak ve (ilk başlatmada) ön kapı proxy'sinin 80 portuna bağlanması.</p></details>
+    <details><summary data-lang="en">Does it conflict with Laragon, XAMPP, Docker?</summary><summary data-lang="tr">Laragon, XAMPP, Docker ile çakışır mı?</summary><p data-lang="en">Not by itself — DevBox uses its own folder and its own ports (8503+, 5432, 3306…). If another tool already uses a port, DevBox tells you before installing and lets you pick another.</p><p data-lang="tr">Kendiliğinden hayır — DevBox kendi klasörünü ve portlarını (8503+, 5432, 3306…) kullanır. Başka bir araç bir portu kullanıyorsa DevBox kurulumdan önce söyler ve başka port seçtirir.</p></details>
+    <details><summary data-lang="en">When is macOS coming?</summary><summary data-lang="tr">macOS ne zaman?</summary><p data-lang="en">The macOS build compiles today, but the runtime/service download sources for macOS still need validation. It ships as a separate release once it passes the same tests as Windows.</p><p data-lang="tr">macOS derlemesi bugün çalışıyor; ancak macOS için çalışma zamanı/servis indirme kaynaklarının doğrulanması gerekiyor. Windows ile aynı testleri geçtiğinde ayrı bir sürüm olarak yayınlanacak.</p></details>
+  </section>
+</main>
+
+<footer><div class="wrap cols">
+  <div>© 2026 <a href="https://harungecit.dev">Harun Geçit</a> · MIT License</div>
+  <div style="display:flex;gap:16px"><a href="privacy.html"><span data-lang="en">Privacy</span><span data-lang="tr">Gizlilik</span></a><a href="terms.html"><span data-lang="en">Terms</span><span data-lang="tr">Kullanım Şartları</span></a><a href="https://github.com/harungecit/DevBox/issues"><span data-lang="en">Report an issue</span><span data-lang="tr">Sorun bildir</span></a></div>
+</div></footer>
+</body>
+</html>

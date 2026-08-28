@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strings"
 )
@@ -109,8 +110,9 @@ func (n *NodeManager) Install(version string, progress chan<- Progress) error {
 		return fmt.Errorf("Node.js %s is already installed", version)
 	}
 
-	// Node.js zip filename: node-v{VERSION}-win-x64.zip
-	filename := fmt.Sprintf("node-v%s-win-x64.zip", version)
+	// Node.js archive filename varies by platform
+	nodeOS, nodeArch := nodeOSArch()
+	filename := fmt.Sprintf("node-v%s-%s-%s.%s", version, nodeOS, nodeArch, nodeArchiveExt())
 	downloadURL := fmt.Sprintf("https://nodejs.org/dist/v%s/%s", version, filename)
 
 	// Also get the SHASUMS256.txt for verification
@@ -134,17 +136,24 @@ func (n *NodeManager) Install(version string, progress chan<- Progress) error {
 		}
 	}
 
-	// Extract - Node.js zips have "node-v{VERSION}-win-x64/" top-level directory
+	// Extract - Node.js archives have "node-v{VERSION}-{os}-{arch}/" top-level directory
 	tmpExtract := filepath.Join(tmpDir(), fmt.Sprintf("node-%s-extract", version))
 	os.RemoveAll(tmpExtract)
 
-	if err := ExtractZip(tmpFile, tmpExtract, progress); err != nil {
-		os.Remove(tmpFile)
-		return err
+	if strings.HasSuffix(filename, ".tar.gz") {
+		if err := ExtractTarGz(tmpFile, tmpExtract, progress); err != nil {
+			os.Remove(tmpFile)
+			return err
+		}
+	} else {
+		if err := ExtractZip(tmpFile, tmpExtract, progress); err != nil {
+			os.Remove(tmpFile)
+			return err
+		}
 	}
 
 	// Move the extracted directory
-	extractedDir := filepath.Join(tmpExtract, fmt.Sprintf("node-v%s-win-x64", version))
+	extractedDir := filepath.Join(tmpExtract, fmt.Sprintf("node-v%s-%s-%s", version, nodeOS, nodeArch))
 	if _, err := os.Stat(extractedDir); os.IsNotExist(err) {
 		extractedDir = tmpExtract
 	}
@@ -186,8 +195,31 @@ func (n *NodeManager) GetGlobal() (string, error) {
 }
 
 func (n *NodeManager) BinaryPath(version string) string {
-	// Node.js on Windows has binaries directly in the root
-	return filepath.Join(runtimeBaseDir("node"), version)
+	if goruntime.GOOS == "windows" {
+		return filepath.Join(runtimeBaseDir("node"), version)
+	}
+	return filepath.Join(runtimeBaseDir("node"), version, "bin")
+}
+
+// nodeOSArch returns the Node.js OS and arch identifiers for downloads
+func nodeOSArch() (string, string) {
+	switch goruntime.GOOS {
+	case "darwin":
+		if goruntime.GOARCH == "arm64" {
+			return "darwin", "arm64"
+		}
+		return "darwin", "x64"
+	default: // windows
+		return "win", "x64"
+	}
+}
+
+// nodeArchiveExt returns the archive extension for the current platform
+func nodeArchiveExt() string {
+	if goruntime.GOOS == "windows" {
+		return "zip"
+	}
+	return "tar.gz"
 }
 
 // fetchNodeSHA256 gets the SHA256 hash for a specific file from SHASUMS256.txt

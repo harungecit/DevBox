@@ -7,12 +7,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 
 	"DevBox/internal/config"
+	"DevBox/internal/platform"
 )
 
 var tunnelURLRe = regexp.MustCompile(`(https://[a-zA-Z0-9-]+\.trycloudflare\.com)`)
@@ -30,7 +31,7 @@ var (
 
 // cloudflaredPath returns the path to the cloudflared executable
 func cloudflaredPath() string {
-	return filepath.Join(config.GetDataDir(), "tools", "cloudflared", "cloudflared.exe")
+	return filepath.Join(config.GetDataDir(), "tools", "cloudflared", platform.BinaryName("cloudflared"))
 }
 
 // per-project state file helpers
@@ -42,15 +43,9 @@ func urlFile(projectName string) string {
 	return filepath.Join(config.GetDataDir(), "services", fmt.Sprintf("cloudflared-%s.url", projectName))
 }
 
-// isProcessAlive checks if a process with the given PID is still running on Windows.
+// isProcessAlive checks if a process with the given PID is still running.
 func isProcessAlive(pid int) bool {
-	const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-	h, err := syscall.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
-	if err != nil {
-		return false
-	}
-	syscall.CloseHandle(h)
-	return true
+	return platform.IsProcessRunning(pid)
 }
 
 // killStaleProcess kills a cloudflared process left from a previous session for a specific project
@@ -87,17 +82,52 @@ func InstallCloudflared() error {
 	toolDir := filepath.Dir(cloudflaredPath())
 	os.MkdirAll(toolDir, 0755)
 
+	if goruntime.GOOS == "darwin" {
+		return installCloudflaredDarwin()
+	}
+	return installCloudflaredWindows()
+}
+
+func installCloudflaredWindows() error {
 	downloadURL := "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
 	dest := cloudflaredPath()
 
 	cmd := exec.Command("powershell", "-Command",
 		fmt.Sprintf(`Invoke-WebRequest -Uri "%s" -OutFile "%s" -UseBasicParsing`, downloadURL, dest))
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	platform.SetProcessAttrs(cmd, false, true)
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to download cloudflared: %w", err)
 	}
 
+	return nil
+}
+
+func installCloudflaredDarwin() error {
+	arch := "amd64"
+	if goruntime.GOARCH == "arm64" {
+		arch = "arm64"
+	}
+	downloadURL := fmt.Sprintf("https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-%s.tgz", arch)
+	dest := cloudflaredPath()
+	toolDir := filepath.Dir(dest)
+
+	// Download tgz
+	tmpFile := filepath.Join(toolDir, "cloudflared.tgz")
+	cmd := exec.Command("curl", "-fsSL", "-o", tmpFile, downloadURL)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to download cloudflared: %w", err)
+	}
+	defer os.Remove(tmpFile)
+
+	// Extract
+	extractCmd := exec.Command("tar", "-xzf", tmpFile, "-C", toolDir)
+	if err := extractCmd.Run(); err != nil {
+		return fmt.Errorf("failed to extract cloudflared: %w", err)
+	}
+
+	// Make executable
+	os.Chmod(dest, 0755)
 	return nil
 }
 
@@ -136,20 +166,18 @@ func StartTunnel(port int, projectName string, domain string, ssl bool) error {
 
 	if ssl {
 		args = append(args, "--no-tls-verify")
-		// For SSL: do NOT set --http-host-header so the tunnel URL stays as Host.
-		// nginx will use the SSL vhost as default for port 443.
-		// This prevents Laravel/PHP from redirecting to the .test domain.
-	} else if domain != "" {
-		// For non-SSL: set Host header so nginx routes to the correct vhost on port 80
-		// (port 80 has a default server that would catch unmatched requests).
+	}
+	// Always set the host header to the project's domain. Without this, multiple
+	// parallel tunnels (one per project) all hit the backend's default vhost
+	// because cloudflared otherwise forwards the random *.trycloudflare.com Host,
+	// which matches no specific vhost and falls into whatever is registered
+	// first. Setting it explicitly per tunnel keeps each project isolated.
+	if domain != "" {
 		args = append(args, "--http-host-header", domain)
 	}
 
 	cmd := exec.Command(exe, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
-		HideWindow:    true,
-	}
+	platform.SetProcessAttrs(cmd, true, true)
 
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
@@ -237,6 +265,9 @@ func GetTunnelURL(projectName string) string {
 	if inst, ok := tunnels[projectName]; ok && inst.url != "" {
 		return inst.url
 	}
+	if r := NamedRouteFor(projectName); r != nil && isNamedConnectorRunning() {
+		return "https://" + r.Hostname
+	}
 
 	// Try to recover from file
 	data, err := os.ReadFile(urlFile(projectName))
@@ -257,6 +288,9 @@ func IsTunnelRunning(projectName string) bool {
 	defer tunnelMu.Unlock()
 
 	if _, ok := tunnels[projectName]; ok {
+		return true
+	}
+	if r := NamedRouteFor(projectName); r != nil && isNamedConnectorRunning() {
 		return true
 	}
 
@@ -283,11 +317,18 @@ func IsTunnelRunning(projectName string) bool {
 
 // GetRunningTunnels returns a map of project names to their tunnel URLs
 // for all currently running tunnels (both in-memory and recovered from PID files).
+// Named-tunnel routes are included as https://<hostname> while the connector is up.
 func GetRunningTunnels() map[string]string {
 	tunnelMu.Lock()
 	defer tunnelMu.Unlock()
 
 	result := make(map[string]string)
+
+	if isNamedConnectorRunning() {
+		for _, r := range loadRoutes() {
+			result[r.Project] = "https://" + r.Hostname
+		}
+	}
 
 	// In-memory tunnels
 	for name, inst := range tunnels {
@@ -303,7 +344,7 @@ func GetRunningTunnels() map[string]string {
 
 	for _, entry := range entries {
 		name := entry.Name()
-		if !strings.HasPrefix(name, "cloudflared-") || !strings.HasSuffix(name, ".pid") {
+		if !strings.HasPrefix(name, "cloudflared-") || !strings.HasSuffix(name, ".pid") || name == "cloudflared-named.pid" {
 			continue
 		}
 		// Extract project name: cloudflared-{name}.pid
@@ -352,4 +393,5 @@ func StopAllTunnels() {
 		os.Remove(urlFile(name))
 	}
 	tunnels = make(map[string]*tunnelInstance)
+	StopNamedConnector()
 }

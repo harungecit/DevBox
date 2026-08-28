@@ -4,13 +4,26 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
+
+	"DevBox/internal/platform"
 )
 
-var mariadbKnownVersions = []AvailableVersion{
-	{Version: "11.6.2", Label: "11.6.2 (Latest)", URL: "https://archive.mariadb.org/mariadb-11.6.2/winx64-packages/mariadb-11.6.2-winx64.zip"},
-	{Version: "11.4.4", Label: "11.4.4 (LTS)", URL: "https://archive.mariadb.org/mariadb-11.4.4/winx64-packages/mariadb-11.4.4-winx64.zip"},
-	{Version: "10.11.10", Label: "10.11.10 (LTS)", URL: "https://archive.mariadb.org/mariadb-10.11.10/winx64-packages/mariadb-10.11.10-winx64.zip"},
+func mariadbKnownVersionsList() []AvailableVersion {
+	if goruntime.GOOS == "darwin" {
+		arch := darwinArch()
+		return []AvailableVersion{
+			{Version: "11.6.2", Label: "11.6.2 (Latest)", URL: fmt.Sprintf("https://archive.mariadb.org/mariadb-11.6.2/bintar-darwin-%s/mariadb-11.6.2-darwin-%s.tar.gz", arch, arch)},
+			{Version: "11.4.4", Label: "11.4.4 (LTS)", URL: fmt.Sprintf("https://archive.mariadb.org/mariadb-11.4.4/bintar-darwin-%s/mariadb-11.4.4-darwin-%s.tar.gz", arch, arch)},
+			{Version: "10.11.10", Label: "10.11.10 (LTS)", URL: fmt.Sprintf("https://archive.mariadb.org/mariadb-10.11.10/bintar-darwin-%s/mariadb-10.11.10-darwin-%s.tar.gz", arch, arch)},
+		}
+	}
+	return []AvailableVersion{
+		{Version: "11.6.2", Label: "11.6.2 (Latest)", URL: "https://archive.mariadb.org/mariadb-11.6.2/winx64-packages/mariadb-11.6.2-winx64.zip"},
+		{Version: "11.4.4", Label: "11.4.4 (LTS)", URL: "https://archive.mariadb.org/mariadb-11.4.4/winx64-packages/mariadb-11.4.4-winx64.zip"},
+		{Version: "10.11.10", Label: "10.11.10 (LTS)", URL: "https://archive.mariadb.org/mariadb-10.11.10/winx64-packages/mariadb-10.11.10-winx64.zip"},
+	}
 }
 
 type MariaDBManager struct{}
@@ -23,17 +36,17 @@ func (m *MariaDBManager) DefaultPort() int     { return 3306 }
 
 func (m *MariaDBManager) IsInstalled() bool {
 	// MariaDB 11+ uses mariadbd.exe, older uses mysqld.exe
-	if _, err := os.Stat(filepath.Join(m.binDir(), "mariadbd.exe")); err == nil {
+	if _, err := os.Stat(filepath.Join(m.binDir(), platform.BinaryName("mariadbd"))); err == nil {
 		return true
 	}
-	if _, err := os.Stat(filepath.Join(m.binDir(), "mysqld.exe")); err == nil {
+	if _, err := os.Stat(filepath.Join(m.binDir(), platform.BinaryName("mysqld"))); err == nil {
 		return true
 	}
 	return false
 }
 
 func (m *MariaDBManager) ListVersions() ([]AvailableVersion, error) {
-	return mariadbKnownVersions, nil
+	return mariadbKnownVersionsList(), nil
 }
 
 func (m *MariaDBManager) Install(version string, port int, progress chan<- Progress) error {
@@ -48,7 +61,13 @@ func (m *MariaDBManager) Install(version string, port int, progress chan<- Progr
 		return err
 	}
 
-	filename := fmt.Sprintf("mariadb-%s-winx64.zip", version)
+	var filename string
+	if goruntime.GOOS == "darwin" {
+		arch := darwinArch()
+		filename = fmt.Sprintf("mariadb-%s-darwin-%s.tar.gz", version, arch)
+	} else {
+		filename = fmt.Sprintf("mariadb-%s-winx64.zip", version)
+	}
 	tmpFile, err := downloadToTmp(downloadURL, filename, progress)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
@@ -63,11 +82,11 @@ func (m *MariaDBManager) Install(version string, port int, progress chan<- Progr
 	os.RemoveAll(tmpExtract)
 	defer os.RemoveAll(tmpExtract)
 
-	if err := extractZip(tmpFile, tmpExtract); err != nil {
+	if err := extractArchive(tmpFile, tmpExtract); err != nil {
 		return fmt.Errorf("extraction failed: %w", err)
 	}
 
-	// MariaDB zip has "mariadb-VERSION-winx64/" top-level directory
+	// MariaDB archive has "mariadb-VERSION-*/" top-level directory
 	entries, _ := os.ReadDir(tmpExtract)
 	extractedDir := ""
 	for _, e := range entries {
@@ -82,10 +101,10 @@ func (m *MariaDBManager) Install(version string, port int, progress chan<- Progr
 
 	// Verify critical binary exists (mariadbd.exe or mysqld.exe)
 	hasServer := false
-	if _, err := os.Stat(filepath.Join(extractedDir, "bin", "mariadbd.exe")); err == nil {
+	if _, err := os.Stat(filepath.Join(extractedDir, "bin", platform.BinaryName("mariadbd"))); err == nil {
 		hasServer = true
 	}
-	if _, err := os.Stat(filepath.Join(extractedDir, "bin", "mysqld.exe")); err == nil {
+	if _, err := os.Stat(filepath.Join(extractedDir, "bin", platform.BinaryName("mysqld"))); err == nil {
 		hasServer = true
 	}
 	if !hasServer {
@@ -146,7 +165,7 @@ func (m *MariaDBManager) Start() error {
 	logFile := filepath.Join(base, "logs", "mariadb-start.log")
 
 	_, err := StartProcess("mariadb", serverExe, []string{
-		fmt.Sprintf("--defaults-file=%s", filepath.Join(base, "my.ini")),
+		fmt.Sprintf("--defaults-file=%s", filepath.Join(base, MysqlConfigName())),
 	}, base, logFile)
 	return err
 }
@@ -157,9 +176,9 @@ func (m *MariaDBManager) Stop() error {
 	}
 
 	// Try graceful shutdown
-	admin := filepath.Join(m.binDir(), "mariadb-admin.exe")
+	admin := filepath.Join(m.binDir(), platform.BinaryName("mariadb-admin"))
 	if _, err := os.Stat(admin); os.IsNotExist(err) {
-		admin = filepath.Join(m.binDir(), "mysqladmin.exe")
+		admin = filepath.Join(m.binDir(), platform.BinaryName("mysqladmin"))
 	}
 	if _, err := os.Stat(admin); err == nil {
 		runCommandSilent(admin, []string{"-u", "root", "shutdown"}, serviceBaseDir("mariadb"))
@@ -233,16 +252,16 @@ func (m *MariaDBManager) binDir() string {
 
 // serverExe returns the path to the MariaDB server binary
 func (m *MariaDBManager) serverExe() string {
-	mariadbd := filepath.Join(m.binDir(), "mariadbd.exe")
+	mariadbd := filepath.Join(m.binDir(), platform.BinaryName("mariadbd"))
 	if _, err := os.Stat(mariadbd); err == nil {
 		return mariadbd
 	}
-	return filepath.Join(m.binDir(), "mysqld.exe")
+	return filepath.Join(m.binDir(), platform.BinaryName("mysqld"))
 }
 
 func (m *MariaDBManager) writeConfig(port int) {
 	base := serviceBaseDir("mariadb")
-	confPath := filepath.Join(base, "my.ini")
+	confPath := filepath.Join(base, MysqlConfigName())
 	basePath := strings.ReplaceAll(base, "\\", "/")
 
 	conf := fmt.Sprintf(`[mysqld]
@@ -266,9 +285,9 @@ func (m *MariaDBManager) initialize() error {
 	base := serviceBaseDir("mariadb")
 
 	// Try mariadb-install-db first (newer MariaDB), then mysql_install_db
-	installDB := filepath.Join(m.binDir(), "mariadb-install-db.exe")
+	installDB := filepath.Join(m.binDir(), platform.BinaryName("mariadb-install-db"))
 	if _, err := os.Stat(installDB); os.IsNotExist(err) {
-		installDB = filepath.Join(m.binDir(), "mysql_install_db.exe")
+		installDB = filepath.Join(m.binDir(), platform.BinaryName("mysql_install_db"))
 	}
 
 	if _, err := os.Stat(installDB); err == nil {
@@ -284,7 +303,7 @@ func (m *MariaDBManager) initialize() error {
 
 	// Fallback: use mysqld --initialize-insecure (works for older MariaDB versions that ship mysqld)
 	serverExe := m.serverExe()
-	iniPath := filepath.Join(base, "my.ini")
+	iniPath := filepath.Join(base, MysqlConfigName())
 	out, err := runCommand(serverExe, []string{
 		fmt.Sprintf("--defaults-file=%s", iniPath),
 		"--initialize-insecure",
@@ -297,11 +316,15 @@ func (m *MariaDBManager) initialize() error {
 }
 
 func (m *MariaDBManager) findDownloadURL(version string) (string, error) {
-	for _, v := range mariadbKnownVersions {
+	for _, v := range mariadbKnownVersionsList() {
 		if v.Version == version {
 			return v.URL, nil
 		}
 	}
 	// Construct URL from version
+	if goruntime.GOOS == "darwin" {
+		arch := darwinArch()
+		return fmt.Sprintf("https://archive.mariadb.org/mariadb-%s/bintar-darwin-%s/mariadb-%s-darwin-%s.tar.gz", version, arch, version, arch), nil
+	}
 	return fmt.Sprintf("https://archive.mariadb.org/mariadb-%s/winx64-packages/mariadb-%s-winx64.zip", version, version), nil
 }

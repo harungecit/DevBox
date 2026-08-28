@@ -3,16 +3,19 @@ package runtime
 import (
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
+	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"DevBox/internal/config"
+	"DevBox/internal/platform"
 )
 
 const composerDownloadURL = "https://getcomposer.org/download/latest-stable/composer.phar"
@@ -35,9 +38,12 @@ func InstallComposer(progress chan<- Progress) error {
 	if phpDir == "" {
 		return fmt.Errorf("no active PHP version set")
 	}
+	return InstallComposerInto(phpDir, progress)
+}
 
+// InstallComposerInto installs Composer into a specific PHP version directory.
+func InstallComposerInto(phpDir string, progress chan<- Progress) error {
 	pharPath := filepath.Join(phpDir, "composer.phar")
-	batPath := filepath.Join(phpDir, "composer.bat")
 
 	if progress != nil {
 		progress <- Progress{Percent: 10, Message: "Downloading composer.phar..."}
@@ -69,10 +75,19 @@ func InstallComposer(progress chan<- Progress) error {
 		progress <- Progress{Percent: 80, Message: "Creating wrapper..."}
 	}
 
-	// Create composer.bat wrapper
-	bat := fmt.Sprintf("@echo off\r\nphp \"%%~dp0composer.phar\" %%*\r\n")
-	if err := os.WriteFile(batPath, []byte(bat), 0644); err != nil {
-		return err
+	// Create platform-appropriate wrapper script
+	if goruntime.GOOS == "windows" {
+		batPath := filepath.Join(phpDir, "composer.bat")
+		bat := "@echo off\r\nphp \"%~dp0composer.phar\" %*\r\n"
+		if err := os.WriteFile(batPath, []byte(bat), 0644); err != nil {
+			return err
+		}
+	} else {
+		shPath := filepath.Join(phpDir, "composer")
+		sh := "#!/bin/sh\nexec php \"$(dirname \"$0\")/composer.phar\" \"$@\"\n"
+		if err := os.WriteFile(shPath, []byte(sh), 0755); err != nil {
+			return err
+		}
 	}
 
 	if progress != nil {
@@ -88,7 +103,7 @@ func GetComposerVersion() string {
 		return ""
 	}
 
-	phpExe := filepath.Join(phpDir, "php.exe")
+	phpExe := filepath.Join(phpDir, platform.BinaryName("php"))
 	pharPath := filepath.Join(phpDir, "composer.phar")
 
 	if _, err := os.Stat(pharPath); os.IsNotExist(err) {
@@ -96,7 +111,7 @@ func GetComposerVersion() string {
 	}
 
 	cmd := exec.Command(phpExe, pharPath, "--version", "--no-ansi")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	platform.SetProcessAttrs(cmd, false, true)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -112,21 +127,137 @@ func GetComposerVersion() string {
 	return strings.TrimSpace(string(out))
 }
 
-// --- PHP-CGI ---
+// --- PHP-CGI (FastCGI) — one instance per PHP version in use ---
+//
+// The globally active PHP version always listens on 9000. Projects pinned to a
+// different version get their own php-cgi instance on a port allocated from
+// config.PhpCgiPorts (9001+), so nginx/caddy/apache vhosts can hand each
+// project to the exact PHP version it asked for. Instance state lives in
+// services/php-cgi-<version>.pid ("pid\nport").
 
-var phpCgiPidFile = ""
+// PHPCGIBasePort is the FastCGI port of the globally active PHP version.
+const PHPCGIBasePort = 9000
 
-// StartPHPCGI starts php-cgi.exe in FastCGI mode
-func StartPHPCGI(version string, port int) error {
-	phpDir := filepath.Join(runtimeBaseDir("php"), version)
-	cgiExe := filepath.Join(phpDir, "php-cgi.exe")
+// PHPCGIInstance describes a running php-cgi process.
+type PHPCGIInstance struct {
+	Version string `json:"version"`
+	Port    int    `json:"port"`
+	PID     int    `json:"pid"`
+}
 
-	if _, err := os.Stat(cgiExe); os.IsNotExist(err) {
-		return fmt.Errorf("php-cgi.exe not found for PHP %s", version)
+func phpCgiStateFile(version string) string {
+	return filepath.Join(config.GetDataDir(), "services", "php-cgi-"+version+".pid")
+}
+
+func legacyPhpCgiPidFile() string {
+	return filepath.Join(config.GetDataDir(), "services", "php-cgi.pid")
+}
+
+// PHPCGIPortFor returns (allocating if needed) the FastCGI port for a PHP version.
+func PHPCGIPortFor(version string) int {
+	global, _ := getGlobalVersion("php")
+	if version == global || version == "" {
+		return PHPCGIBasePort
+	}
+	cfg := config.Get()
+	if cfg.PhpCgiPorts == nil {
+		cfg.PhpCgiPorts = map[string]int{}
+	}
+	if p, ok := cfg.PhpCgiPorts[version]; ok && p != PHPCGIBasePort {
+		return p
+	}
+	used := map[int]bool{PHPCGIBasePort: true}
+	for _, p := range cfg.PhpCgiPorts {
+		used[p] = true
+	}
+	for p := PHPCGIBasePort + 1; p < PHPCGIBasePort+100; p++ {
+		if used[p] {
+			continue
+		}
+		cfg.PhpCgiPorts[version] = p
+		config.Save()
+		return p
+	}
+	return PHPCGIBasePort
+}
+
+// RunningPHPCGIInstances lists live php-cgi processes started by DevBox.
+// Stale state files are cleaned up on the way; a php-cgi.pid left by an older
+// DevBox (single-instance era) is killed because its version is unknown.
+func RunningPHPCGIInstances() []PHPCGIInstance {
+	svcDir := filepath.Join(config.GetDataDir(), "services")
+
+	if data, err := os.ReadFile(legacyPhpCgiPidFile()); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil && isProcessAlive(pid) {
+			if p, err := os.FindProcess(pid); err == nil {
+				p.Kill()
+			}
+		}
+		os.Remove(legacyPhpCgiPidFile())
 	}
 
-	if IsPHPCGIRunning() {
+	entries, err := os.ReadDir(svcDir)
+	if err != nil {
 		return nil
+	}
+	var out []PHPCGIInstance
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "php-cgi-") || !strings.HasSuffix(name, ".pid") {
+			continue
+		}
+		version := strings.TrimSuffix(strings.TrimPrefix(name, "php-cgi-"), ".pid")
+		path := filepath.Join(svcDir, name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		pid, _ := strconv.Atoi(strings.TrimSpace(lines[0]))
+		port := PHPCGIBasePort
+		if len(lines) > 1 {
+			port, _ = strconv.Atoi(strings.TrimSpace(lines[1]))
+		}
+		if pid <= 0 || !isProcessAlive(pid) {
+			os.Remove(path)
+			continue
+		}
+		out = append(out, PHPCGIInstance{Version: version, Port: port, PID: pid})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Port < out[j].Port })
+	return out
+}
+
+func findPHPCGIInstance(version string) *PHPCGIInstance {
+	for _, inst := range RunningPHPCGIInstances() {
+		if inst.Version == version {
+			i := inst
+			return &i
+		}
+	}
+	return nil
+}
+
+// StartPHPCGIVersion starts php-cgi for a PHP version on its assigned port.
+// Returns the port. Idempotent when the instance is already up on that port.
+func StartPHPCGIVersion(version string) (int, error) {
+	phpDir := filepath.Join(runtimeBaseDir("php"), version)
+	cgiExe := filepath.Join(phpDir, platform.BinaryName("php-cgi"))
+	if _, err := os.Stat(cgiExe); os.IsNotExist(err) {
+		return 0, fmt.Errorf("php-cgi not found for PHP %s", version)
+	}
+
+	port := PHPCGIPortFor(version)
+	if inst := findPHPCGIInstance(version); inst != nil {
+		if inst.Port == port {
+			return port, nil
+		}
+		stopInstance(*inst)
+	}
+	if portInUse(port) {
+		// Whatever holds the port is not one of ours (we just checked) — most
+		// likely a php-cgi from a previous session whose state file was lost.
+		return 0, fmt.Errorf("FastCGI port %d is already in use", port)
 	}
 
 	// Ensure php.ini exists and common extensions are enabled
@@ -135,14 +266,14 @@ func StartPHPCGI(version string, port int) error {
 
 	logDir := filepath.Join(config.GetDataDir(), "logs")
 	os.MkdirAll(logDir, 0755)
-	logFile := filepath.Join(logDir, "php-cgi.log")
+	logFile := filepath.Join(logDir, "php-cgi-"+version+".log")
 
 	cmd := exec.Command(cgiExe, "-b", fmt.Sprintf("127.0.0.1:%d", port))
 	cmd.Dir = phpDir
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
-		HideWindow:    true,
-	}
+	// PHP_FCGI_MAX_REQUESTS=0 keeps php-cgi alive instead of exiting after 500
+	// requests; PHP_FCGI_CHILDREN lets it serve a few requests concurrently.
+	cmd.Env = append(os.Environ(), "PHP_FCGI_MAX_REQUESTS=0", "PHP_FCGI_CHILDREN=4")
+	platform.SetProcessAttrs(cmd, true, true)
 
 	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err == nil {
@@ -154,13 +285,13 @@ func StartPHPCGI(version string, port int) error {
 		if f != nil {
 			f.Close()
 		}
-		return fmt.Errorf("failed to start php-cgi: %w", err)
+		return 0, fmt.Errorf("failed to start php-cgi: %w", err)
 	}
 
 	pid := cmd.Process.Pid
-	phpCgiPidFile = filepath.Join(config.GetDataDir(), "services", "php-cgi.pid")
-	os.MkdirAll(filepath.Dir(phpCgiPidFile), 0755)
-	os.WriteFile(phpCgiPidFile, []byte(strconv.Itoa(pid)), 0644)
+	state := phpCgiStateFile(version)
+	os.MkdirAll(filepath.Dir(state), 0755)
+	os.WriteFile(state, []byte(fmt.Sprintf("%d\n%d", pid, port)), 0644)
 
 	go func() {
 		cmd.Wait()
@@ -169,56 +300,85 @@ func StartPHPCGI(version string, port int) error {
 		}
 	}()
 
-	// Brief check to confirm it started
 	time.Sleep(500 * time.Millisecond)
 	if !isProcessAlive(pid) {
-		os.Remove(phpCgiPidFile)
-		return fmt.Errorf("php-cgi exited immediately")
+		os.Remove(state)
+		return 0, fmt.Errorf("php-cgi %s exited immediately (see logs/php-cgi-%s.log)", version, version)
 	}
-
-	return nil
+	return port, nil
 }
 
-// StopPHPCGI stops the running php-cgi process
+func stopInstance(inst PHPCGIInstance) {
+	if p, err := os.FindProcess(inst.PID); err == nil {
+		p.Kill()
+	}
+	os.Remove(phpCgiStateFile(inst.Version))
+}
+
+// StopPHPCGIVersion stops the php-cgi instance serving a PHP version.
+func StopPHPCGIVersion(version string) {
+	if inst := findPHPCGIInstance(version); inst != nil {
+		stopInstance(*inst)
+	}
+}
+
+// EnsurePHPCGI reconciles running instances with the set of versions that
+// projects need: extra instances are stopped, missing ones started, and any
+// instance whose assigned port changed (e.g. the global version switched, so
+// 9000 now belongs to another version) is restarted. Returns version→port for
+// every version that ended up running; failures are reported per version.
+func EnsurePHPCGI(versions []string) (map[string]int, map[string]error) {
+	want := map[string]bool{}
+	for _, v := range versions {
+		if v != "" {
+			want[v] = true
+		}
+	}
+	for _, inst := range RunningPHPCGIInstances() {
+		if !want[inst.Version] || inst.Port != PHPCGIPortFor(inst.Version) {
+			stopInstance(inst)
+		}
+	}
+	ports := map[string]int{}
+	errs := map[string]error{}
+	for v := range want {
+		port, err := StartPHPCGIVersion(v)
+		if err != nil {
+			errs[v] = err
+			continue
+		}
+		ports[v] = port
+	}
+	return ports, errs
+}
+
+// StartPHPCGI starts the FastCGI instance for a version. The port argument is
+// kept for API compatibility; ports are managed by PHPCGIPortFor.
+func StartPHPCGI(version string, _ int) error {
+	_, err := StartPHPCGIVersion(version)
+	return err
+}
+
+// StopPHPCGI stops every php-cgi instance.
 func StopPHPCGI() error {
-	if phpCgiPidFile == "" {
-		phpCgiPidFile = filepath.Join(config.GetDataDir(), "services", "php-cgi.pid")
+	for _, inst := range RunningPHPCGIInstances() {
+		stopInstance(inst)
 	}
-
-	data, err := os.ReadFile(phpCgiPidFile)
-	if err != nil {
-		return nil
-	}
-
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		os.Remove(phpCgiPidFile)
-		return nil
-	}
-
-	proc, err := os.FindProcess(pid)
-	if err == nil {
-		proc.Kill()
-	}
-
-	os.Remove(phpCgiPidFile)
 	return nil
 }
 
-// IsPHPCGIRunning checks if php-cgi process is alive
+// IsPHPCGIRunning reports whether any php-cgi instance is alive.
 func IsPHPCGIRunning() bool {
-	pidFile := filepath.Join(config.GetDataDir(), "services", "php-cgi.pid")
-	data, err := os.ReadFile(pidFile)
+	return len(RunningPHPCGIInstances()) > 0
+}
+
+func portInUse(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
 	if err != nil {
 		return false
 	}
-
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return false
-	}
-
-	return isProcessAlive(pid)
+	conn.Close()
+	return true
 }
 
 // --- helpers ---
@@ -231,20 +391,15 @@ func activePHPDir() string {
 	return filepath.Join(runtimeBaseDir("php"), global)
 }
 
+// PHPVersionInstalled reports whether a PHP version directory exists.
+func PHPVersionInstalled(version string) bool {
+	if version == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(runtimeBaseDir("php"), version, platform.BinaryName("php")))
+	return err == nil
+}
+
 func isProcessAlive(pid int) bool {
-	const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-	const STILL_ACTIVE = 259
-
-	handle, err := syscall.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
-	if err != nil {
-		return false
-	}
-	defer syscall.CloseHandle(handle)
-
-	var exitCode uint32
-	err = syscall.GetExitCodeProcess(handle, &exitCode)
-	if err != nil {
-		return false
-	}
-	return exitCode == STILL_ACTIVE
+	return platform.IsProcessRunning(pid)
 }

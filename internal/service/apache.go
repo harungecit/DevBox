@@ -7,7 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strings"
+
+	"DevBox/internal/platform"
 )
 
 const (
@@ -25,14 +28,17 @@ func NewApacheManager() *ApacheManager { return &ApacheManager{} }
 
 func (a *ApacheManager) Name() string        { return "apache" }
 func (a *ApacheManager) DisplayName() string  { return "Apache" }
-func (a *ApacheManager) DefaultPort() int     { return 8080 }
+func (a *ApacheManager) DefaultPort() int     { return 8504 }
 
 func (a *ApacheManager) IsInstalled() bool {
-	_, err := os.Stat(filepath.Join(serviceBaseDir("apache"), "bin", "httpd.exe"))
+	_, err := os.Stat(filepath.Join(serviceBaseDir("apache"), "bin", platform.BinaryName("httpd")))
 	return err == nil
 }
 
 func (a *ApacheManager) ListVersions() ([]AvailableVersion, error) {
+	if goruntime.GOOS != "windows" {
+		return nil, fmt.Errorf("Apache is currently available on Windows only")
+	}
 	versions, err := a.scrapeVersions()
 	if err != nil || len(versions) == 0 {
 		return apacheKnownVersions, nil
@@ -44,6 +50,10 @@ func (a *ApacheManager) ListVersions() ([]AvailableVersion, error) {
 }
 
 func (a *ApacheManager) Install(version string, port int, progress chan<- Progress) error {
+	if goruntime.GOOS != "windows" {
+		return fmt.Errorf("Apache installation is currently supported on Windows only. On macOS, consider using Nginx or Caddy instead")
+	}
+
 	base := serviceBaseDir("apache")
 
 	if port <= 0 {
@@ -90,7 +100,7 @@ func (a *ApacheManager) Install(version string, port int, progress chan<- Progre
 		}
 	}
 
-	if _, err := os.Stat(filepath.Join(extractedDir, "bin", "httpd.exe")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(extractedDir, "bin", platform.BinaryName("httpd"))); os.IsNotExist(err) {
 		return fmt.Errorf("httpd.exe not found in extracted files")
 	}
 
@@ -142,7 +152,7 @@ func (a *ApacheManager) Start() error {
 	}
 
 	base := serviceBaseDir("apache")
-	exe := filepath.Join(base, "bin", "httpd.exe")
+	exe := filepath.Join(base, "bin", platform.BinaryName("httpd"))
 	logFile := filepath.Join(base, "logs", "devbox-apache.log")
 
 	_, err := StartProcess("apache", exe, []string{}, base, logFile)
@@ -250,6 +260,18 @@ func (a *ApacheManager) patchConfig(port int) {
 	// Replace ServerName if present
 	content = regexp.MustCompile(`(?m)^#?ServerName\s+.*`).ReplaceAllString(content, fmt.Sprintf("ServerName localhost:%d", port))
 
+	// Modules DevBox vhosts rely on: reverse proxy for app servers, FastCGI proxy
+	// for PHP (php-cgi), rewrite for framework front controllers (.htaccess).
+	for _, mod := range []string{"proxy_module", "proxy_http_module", "proxy_fcgi_module", "rewrite_module", "headers_module"} {
+		re := regexp.MustCompile(`(?m)^#\s*(LoadModule\s+` + mod + `\s+.*)$`)
+		content = re.ReplaceAllString(content, "$1")
+	}
+
+	// Per-project vhosts written by project/vhost.go live in conf/extra/vhost-*.conf.
+	if !strings.Contains(content, "conf/extra/vhost-*.conf") {
+		content = strings.TrimRight(content, "\r\n") + "\n\n# DevBox project vhosts\nIncludeOptional conf/extra/vhost-*.conf\n"
+	}
+
 	os.WriteFile(confPath, []byte(content), 0644)
 }
 
@@ -267,6 +289,11 @@ LoadModule authz_host_module modules/mod_authz_host.so
 LoadModule dir_module modules/mod_dir.so
 LoadModule mime_module modules/mod_mime.so
 LoadModule log_config_module modules/mod_log_config.so
+LoadModule proxy_module modules/mod_proxy.so
+LoadModule proxy_http_module modules/mod_proxy_http.so
+LoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so
+LoadModule rewrite_module modules/mod_rewrite.so
+LoadModule headers_module modules/mod_headers.so
 
 ErrorLog "logs/error.log"
 LogLevel warn
@@ -280,6 +307,9 @@ DocumentRoot "%s/htdocs"
 
 DirectoryIndex index.html
 TypesConfig conf/mime.types
+
+# DevBox project vhosts
+IncludeOptional conf/extra/vhost-*.conf
 `, baseFwd, port, port, baseFwd, baseFwd)
 
 	os.MkdirAll(filepath.Dir(confPath), 0755)

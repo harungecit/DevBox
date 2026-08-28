@@ -4,12 +4,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
+
+	"DevBox/internal/platform"
 )
 
-var mongoKnownVersions = []AvailableVersion{
-	{Version: "8.0.4", Label: "8.0.4 (Latest)", URL: "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-8.0.4.zip"},
-	{Version: "7.0.16", Label: "7.0.16 (Previous)", URL: "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-7.0.16.zip"},
+func mongoKnownVersionsList() []AvailableVersion {
+	if goruntime.GOOS == "darwin" {
+		arch := darwinArch()
+		return []AvailableVersion{
+			{Version: "8.0.4", Label: "8.0.4 (Latest)", URL: fmt.Sprintf("https://fastdl.mongodb.org/osx/mongodb-macos-%s-8.0.4.tgz", arch)},
+			{Version: "7.0.16", Label: "7.0.16 (Previous)", URL: fmt.Sprintf("https://fastdl.mongodb.org/osx/mongodb-macos-%s-7.0.16.tgz", arch)},
+		}
+	}
+	return []AvailableVersion{
+		{Version: "8.0.4", Label: "8.0.4 (Latest)", URL: "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-8.0.4.zip"},
+		{Version: "7.0.16", Label: "7.0.16 (Previous)", URL: "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-7.0.16.zip"},
+	}
 }
 
 type MongoDBManager struct{}
@@ -21,12 +33,12 @@ func (m *MongoDBManager) DisplayName() string  { return "MongoDB" }
 func (m *MongoDBManager) DefaultPort() int     { return 27017 }
 
 func (m *MongoDBManager) IsInstalled() bool {
-	_, err := os.Stat(filepath.Join(m.binDir(), "mongod.exe"))
+	_, err := os.Stat(filepath.Join(m.binDir(), platform.BinaryName("mongod")))
 	return err == nil
 }
 
 func (m *MongoDBManager) ListVersions() ([]AvailableVersion, error) {
-	return mongoKnownVersions, nil
+	return mongoKnownVersionsList(), nil
 }
 
 func (m *MongoDBManager) Install(version string, port int, progress chan<- Progress) error {
@@ -41,7 +53,13 @@ func (m *MongoDBManager) Install(version string, port int, progress chan<- Progr
 		return err
 	}
 
-	filename := fmt.Sprintf("mongodb-windows-x86_64-%s.zip", version)
+	var filename string
+	if goruntime.GOOS == "darwin" {
+		arch := darwinArch()
+		filename = fmt.Sprintf("mongodb-macos-%s-%s.tgz", arch, version)
+	} else {
+		filename = fmt.Sprintf("mongodb-windows-x86_64-%s.zip", version)
+	}
 	tmpFile, err := downloadToTmp(downloadURL, filename, progress)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
@@ -56,11 +74,11 @@ func (m *MongoDBManager) Install(version string, port int, progress chan<- Progr
 	os.RemoveAll(tmpExtract)
 	defer os.RemoveAll(tmpExtract)
 
-	if err := extractZip(tmpFile, tmpExtract); err != nil {
+	if err := extractArchive(tmpFile, tmpExtract); err != nil {
 		return fmt.Errorf("extraction failed: %w", err)
 	}
 
-	// Find extracted directory (e.g., mongodb-win32-x86_64-windows-8.0.4/)
+	// Find extracted directory (e.g., mongodb-win32-x86_64-windows-8.0.4/ or mongodb-macos-...)
 	entries, _ := os.ReadDir(tmpExtract)
 	extractedDir := ""
 	for _, e := range entries {
@@ -73,8 +91,8 @@ func (m *MongoDBManager) Install(version string, port int, progress chan<- Progr
 		return fmt.Errorf("MongoDB directory not found after extraction")
 	}
 
-	if _, err := os.Stat(filepath.Join(extractedDir, "bin", "mongod.exe")); os.IsNotExist(err) {
-		return fmt.Errorf("mongod.exe not found in extracted files - download may be corrupt")
+	if _, err := os.Stat(filepath.Join(extractedDir, "bin", platform.BinaryName("mongod"))); os.IsNotExist(err) {
+		return fmt.Errorf("mongod binary not found in extracted files - download may be corrupt")
 	}
 
 	if progress != nil {
@@ -123,7 +141,7 @@ func (m *MongoDBManager) Start() error {
 	}
 
 	base := serviceBaseDir("mongodb")
-	mongod := filepath.Join(m.binDir(), "mongod.exe")
+	mongod := filepath.Join(m.binDir(), platform.BinaryName("mongod"))
 	configFile := filepath.Join(base, "mongod.cfg")
 	logFile := filepath.Join(base, "logs", "mongod.log")
 
@@ -227,11 +245,15 @@ systemLog:
 }
 
 func (m *MongoDBManager) findDownloadURL(version string) (string, error) {
-	for _, v := range mongoKnownVersions {
+	for _, v := range mongoKnownVersionsList() {
 		if v.Version == version {
 			return v.URL, nil
 		}
 	}
 	// Construct URL from version
+	if goruntime.GOOS == "darwin" {
+		arch := darwinArch()
+		return fmt.Sprintf("https://fastdl.mongodb.org/osx/mongodb-macos-%s-%s.tgz", arch, version), nil
+	}
 	return fmt.Sprintf("https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-%s.zip", version), nil
 }

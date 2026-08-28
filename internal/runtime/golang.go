@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strings"
 )
@@ -62,15 +63,15 @@ func (g *GoManager) ListRemote() ([]Version, error) {
 	seen := map[string]bool{}
 
 	for _, av := range apiVersions {
-		// Only include versions with windows/amd64 archives
-		hasWindows := false
+		// Only include versions with archives for the current platform
+		hasPlatform := false
 		for _, f := range av.Files {
-			if f.OS == "windows" && f.Arch == "amd64" && f.Kind == "archive" {
-				hasWindows = true
+			if f.OS == goruntime.GOOS && f.Arch == goArch() && f.Kind == "archive" {
+				hasPlatform = true
 				break
 			}
 		}
-		if !hasWindows {
+		if !hasPlatform {
 			continue
 		}
 
@@ -148,13 +149,20 @@ func (g *GoManager) Install(version string, progress chan<- Progress) error {
 		return fmt.Errorf("checksum verification failed: %w", err)
 	}
 
-	// Extract - Go zips have a "go/" top-level directory
+	// Extract - Go archives have a "go/" top-level directory
 	tmpExtract := filepath.Join(tmpDir(), fmt.Sprintf("go-%s-extract", version))
 	os.RemoveAll(tmpExtract)
 
-	if err := ExtractZip(tmpFile, tmpExtract, progress); err != nil {
-		os.Remove(tmpFile)
-		return err
+	if strings.HasSuffix(file.Filename, ".tar.gz") {
+		if err := ExtractTarGz(tmpFile, tmpExtract, progress); err != nil {
+			os.Remove(tmpFile)
+			return err
+		}
+	} else {
+		if err := ExtractZip(tmpFile, tmpExtract, progress); err != nil {
+			os.Remove(tmpFile)
+			return err
+		}
 	}
 
 	// Move the extracted "go" folder to the final destination
@@ -205,7 +213,7 @@ func (g *GoManager) BinaryPath(version string) string {
 	return filepath.Join(runtimeBaseDir("go"), version, "bin")
 }
 
-// findFile finds the windows/amd64 archive for a specific version
+// findFile finds the archive for the current platform for a specific version
 func (g *GoManager) findFile(version string) (*goAPIFile, error) {
 	resp, err := http.Get(goAPIURL)
 	if err != nil {
@@ -227,12 +235,17 @@ func (g *GoManager) findFile(version string) (*goAPIFile, error) {
 	for _, av := range apiVersions {
 		if av.Version == goVersion {
 			for _, f := range av.Files {
-				if f.OS == "windows" && f.Arch == "amd64" && f.Kind == "archive" {
+				if f.OS == goruntime.GOOS && f.Arch == goArch() && f.Kind == "archive" {
 					return &f, nil
 				}
 			}
 		}
 	}
 
-	return nil, fmt.Errorf("Go %s not found for windows/amd64", version)
+	return nil, fmt.Errorf("Go %s not found for %s/%s", version, goruntime.GOOS, goArch())
+}
+
+// goArch returns the Go architecture string for downloads
+func goArch() string {
+	return goruntime.GOARCH
 }
