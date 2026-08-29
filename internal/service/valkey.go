@@ -228,10 +228,12 @@ func (v *ValkeyManager) Start() error {
 
 	base := serviceBaseDir("valkey")
 	exe := filepath.Join(base, platform.BinaryName("valkey-server"))
-	confFile := filepath.Join(base, "valkey.conf")
 	logFile := filepath.Join(base, "logs", "valkey.log")
 
-	_, err := StartProcess("valkey", exe, []string{confFile}, base, logFile)
+		// The Windows builds are MSYS-based and take the service dir as their
+	// filesystem root, so absolute Windows paths ("C:\...") are unusable —
+	// the config is passed relative to the working directory (base).
+	_, err := StartProcess("valkey", exe, []string{"valkey.conf"}, base, logFile)
 	return err
 }
 
@@ -304,7 +306,8 @@ func (v *ValkeyManager) Info() ServiceInfo {
 func (v *ValkeyManager) writeConfig(port int) {
 	base := serviceBaseDir("valkey")
 	confPath := filepath.Join(base, "valkey.conf")
-	dataDir := strings.ReplaceAll(filepath.Join(base, "data"), "\\", "/")
+	// Relative to the service dir (see Start: MSYS builds can't use C:\ paths).
+	dataDir := "data"
 
 	conf := fmt.Sprintf(`# DevBox Valkey Configuration
 bind 127.0.0.1
@@ -315,7 +318,7 @@ appendonly yes
 appendfilename "appendonly.aof"
 maxmemory 256mb
 maxmemory-policy allkeys-lru
-`, port, dataDir)
+%s`, port, dataDir, redisExtraConfig("valkey"))
 
 	os.WriteFile(confPath, []byte(conf), 0644)
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import ConfirmDialog from '../lib/components/ConfirmDialog.svelte';
   import { t } from '../lib/i18n/index';
   import {
     IsAdminerInstalled,
@@ -31,7 +32,13 @@
     InstallBun,
     GetBunVersion,
     UninstallBun,
+    GetDevTools,
+    InstallDevTool,
+    UninstallDevTool,
+    OpenDevTool,
+    StopDevTool,
   } from '../../wailsjs/go/main/App';
+  import DevToolRow from '../lib/components/DevToolRow.svelte';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
 
   let errorMessage: string = '';
@@ -276,6 +283,75 @@
     uninstallingBun = false;
   }
 
+  // --- Developer tools catalog (uv, pipx, air, cargo-watch, Redis Commander…) ---
+  interface DevTool {
+    id: string; name: string; group: string; runtime: string; kind: string;
+    desc: string; homepage: string; port: number; forServices: string[];
+    installed: boolean; version: string; running: boolean; url: string;
+    available: boolean; serviceName: string;
+  }
+  let devTools: DevTool[] = [];
+  let devToolBusy: Record<string, boolean> = {};
+  let devToolProgress: Record<string, string> = {};
+  let activePythonVersion = '';
+  let activeGoVersion = '';
+  let activeRustVersion = '';
+
+  const toolColors: Record<string, string> = {
+    uv: 'bg-violet-500/10 text-violet-500', pipx: 'bg-yellow-500/10 text-yellow-600', poetry: 'bg-blue-500/10 text-blue-500',
+    air: 'bg-sky-500/10 text-sky-500', 'golangci-lint': 'bg-teal-500/10 text-teal-500', gopls: 'bg-cyan-500/10 text-cyan-500',
+    'cargo-watch': 'bg-orange-500/10 text-orange-500', 'cargo-edit': 'bg-orange-600/10 text-orange-600', 'cargo-audit': 'bg-red-500/10 text-red-500',
+    'redis-commander': 'bg-red-500/10 text-red-500', 'mongo-express': 'bg-green-600/10 text-green-600',
+  };
+  $: toolsByGroup = (g: string) => devTools.filter((t) => t.group === g);
+
+  async function loadDevTools() {
+    try {
+      devTools = (await GetDevTools()) || [];
+      activePythonVersion = await GetGlobalRuntime('python');
+      activeGoVersion = await GetGlobalRuntime('go');
+      activeRustVersion = await GetGlobalRuntime('rust');
+    } catch (e) {
+      // non-fatal
+    }
+  }
+  function setBusy(id: string, on: boolean) {
+    devToolBusy = { ...devToolBusy, [id]: on };
+    if (!on) devToolProgress = { ...devToolProgress, [id]: '' };
+  }
+  async function installDevTool(id: string) {
+    errorMessage = '';
+    setBusy(id, true);
+    try { await InstallDevTool(id); } catch (e: any) { errorMessage = `${id}: ${errorStr(e)}`; setBusy(id, false); }
+  }
+  async function uninstallDevTool(id: string) {
+    errorMessage = '';
+    setBusy(id, true);
+    try { await UninstallDevTool(id); await loadDevTools(); } catch (e: any) { errorMessage = `${id}: ${errorStr(e)}`; }
+    setBusy(id, false);
+  }
+  async function openDevTool(id: string) {
+    errorMessage = '';
+    setBusy(id, true);
+    try { await OpenDevTool(id); await loadDevTools(); } catch (e: any) { errorMessage = `${id}: ${errorStr(e)}`; }
+    setBusy(id, false);
+  }
+  async function stopDevTool(id: string) {
+    setBusy(id, true);
+    try { await StopDevTool(id); await loadDevTools(); } catch (e: any) { errorMessage = `${id}: ${errorStr(e)}`; }
+    setBusy(id, false);
+  }
+
+  // Every uninstall on this page goes through one confirmation dialog.
+  let pendingUninstall: { label: string; run: () => Promise<void> } | null = null;
+  let uninstallBusy = false;
+  function askUninstall(label: string, run: () => Promise<void>) { pendingUninstall = { label, run }; }
+  async function confirmUninstall() {
+    if (!pendingUninstall) return;
+    uninstallBusy = true;
+    try { await pendingUninstall.run(); } finally { uninstallBusy = false; pendingUninstall = null; }
+  }
+
   function errorStr(e: any): string {
     return typeof e === 'string' ? e : e?.message || JSON.stringify(e);
   }
@@ -329,8 +405,21 @@
       errorMessage = `pnpm: ${data?.error || 'enable failed'}`;
     }));
 
+    eventUnsubs.push(EventsOn('devtool:progress', (d: any) => {
+      devToolProgress = { ...devToolProgress, [d.id]: d.message || '' };
+    }));
+    eventUnsubs.push(EventsOn('devtool:installed', async (d: any) => {
+      setBusy(d.id, false);
+      await loadDevTools();
+    }));
+    eventUnsubs.push(EventsOn('devtool:error', (d: any) => {
+      setBusy(d.id, false);
+      errorMessage = `${d.id}: ${d.error || 'install failed'}`;
+    }));
+
     loadDBTools();
     loadPackageManagers();
+    loadDevTools();
   });
 
   onDestroy(() => {
@@ -398,13 +487,26 @@
                 {$t('tools.stopServer')}
               </button>
             {/if}
-            <button class="text-xs px-2.5 py-1.5 rounded-lg text-red-500 hover:bg-red-500/10 border border-red-500/20 disabled:opacity-50" on:click={uninstallAdminerHandler} disabled={adminerBusy} title={$t('tools.uninstall')}>
-              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            <button class="btn-icon text-red-500 hover:bg-red-500/10" on:click={() => askUninstall('Adminer', uninstallAdminerHandler)} disabled={adminerBusy} title={$t('tools.uninstall')}>
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
           {/if}
         </div>
       </div>
     </div>
+
+    {#if toolsByGroup('service-ui').length > 0}
+      <div class="mb-4">
+        <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-1">{$t('tools.serviceUiTitle')}</div>
+        <p class="text-[11px] text-[var(--color-text-secondary)] mb-2">{$t('tools.serviceUiSubtitle')}</p>
+        <div class="space-y-2">
+          {#each toolsByGroup('service-ui') as tool (tool.id)}
+            <DevToolRow {tool} busy={!!devToolBusy[tool.id]} progress={devToolProgress[tool.id] || ''} color={toolColors[tool.id] || 'bg-slate-500/10 text-slate-500'}
+              onInstall={installDevTool} onUninstall={(id) => askUninstall(id, () => uninstallDevTool(id))} onOpen={openDevTool} onStop={stopDevTool} />
+          {/each}
+        </div>
+      </div>
+    {/if}
 
     {#if dbTools.length > 0}
       <div>
@@ -597,9 +699,8 @@
           </div>
           <div class="flex items-center gap-2 flex-shrink-0">
             {#if bunInstalled}
-              <button class="text-xs px-2.5 py-1 rounded-lg text-red-500 hover:bg-red-500/10 border border-red-500/20 disabled:opacity-50" on:click={uninstallBun} disabled={uninstallingBun}>
-                {#if uninstallingBun}<div class="w-3 h-3 border-2 border-red-500 border-t-transparent rounded-full animate-spin inline-block mr-1"></div>{/if}
-                {$t('tools.uninstall')}
+              <button class="btn-icon text-red-500 hover:bg-red-500/10" on:click={() => askUninstall('Bun', uninstallBun)} disabled={uninstallingBun} title={$t('tools.uninstall')}>
+                {#if uninstallingBun}<div class="w-4 h-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>{:else}<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>{/if}
               </button>
             {:else}
               <button class="text-xs px-2.5 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50" on:click={installBun} disabled={installingBun}>
@@ -611,5 +712,99 @@
         </div>
       </div>
     </div>
+
+    <!-- Python group -->
+    <div class="mt-5">
+      <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-2">{$t('tools.pythonGroup')}</div>
+      {#if !activePythonVersion}
+        <p class="text-[11px] text-[var(--color-text-secondary)] italic mb-2">{$t('tools.needsRuntime', 'Python')}</p>
+      {/if}
+      <div class="space-y-2">
+        <div class="flex items-center justify-between p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]">
+          <div class="flex items-start gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-lg bg-yellow-500/10 text-yellow-600 flex items-center justify-center font-bold text-sm flex-shrink-0">p</div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-sm font-bold">pip</span>
+                <span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold uppercase">{$t('tools.builtIn')}</span>
+                {#if activePythonVersion}<span class="text-xs font-mono text-[var(--color-text-secondary)]">{activePythonVersion}</span>{/if}
+              </div>
+              <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">{$t('tools.pipDesc')}</p>
+            </div>
+          </div>
+        </div>
+        {#each toolsByGroup('python') as tool (tool.id)}
+          <DevToolRow {tool} busy={!!devToolBusy[tool.id]} progress={devToolProgress[tool.id] || ''} color={toolColors[tool.id] || 'bg-slate-500/10 text-slate-500'}
+            onInstall={installDevTool} onUninstall={(id) => askUninstall(id, () => uninstallDevTool(id))} />
+        {/each}
+      </div>
+    </div>
+
+    <!-- Go group -->
+    <div class="mt-5">
+      <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-2">{$t('tools.goGroup')}</div>
+      {#if !activeGoVersion}
+        <p class="text-[11px] text-[var(--color-text-secondary)] italic mb-2">{$t('tools.needsRuntime', 'Go')}</p>
+      {/if}
+      <div class="space-y-2">
+        <div class="flex items-center justify-between p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]">
+          <div class="flex items-start gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-lg bg-sky-500/10 text-sky-500 flex items-center justify-center font-bold text-sm flex-shrink-0">G</div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-sm font-bold">go mod</span>
+                <span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold uppercase">{$t('tools.builtIn')}</span>
+                {#if activeGoVersion}<span class="text-xs font-mono text-[var(--color-text-secondary)]">{activeGoVersion}</span>{/if}
+              </div>
+              <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">{$t('tools.goModDesc')}</p>
+            </div>
+          </div>
+        </div>
+        {#each toolsByGroup('go') as tool (tool.id)}
+          <DevToolRow {tool} busy={!!devToolBusy[tool.id]} progress={devToolProgress[tool.id] || ''} color={toolColors[tool.id] || 'bg-slate-500/10 text-slate-500'}
+            onInstall={installDevTool} onUninstall={(id) => askUninstall(id, () => uninstallDevTool(id))} />
+        {/each}
+      </div>
+    </div>
+
+    <!-- Rust group -->
+    <div class="mt-5">
+      <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-2">{$t('tools.rustGroup')}</div>
+      {#if !activeRustVersion}
+        <p class="text-[11px] text-[var(--color-text-secondary)] italic mb-2">{$t('tools.needsRuntime', 'Rust')}</p>
+      {/if}
+      <div class="space-y-2">
+        <div class="flex items-center justify-between p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]">
+          <div class="flex items-start gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-lg bg-orange-600/10 text-orange-600 flex items-center justify-center font-bold text-sm flex-shrink-0">R</div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-sm font-bold">cargo</span>
+                <span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold uppercase">{$t('tools.builtIn')}</span>
+                {#if activeRustVersion}<span class="text-xs font-mono text-[var(--color-text-secondary)]">{activeRustVersion}</span>{/if}
+              </div>
+              <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">{$t('tools.cargoDesc')}</p>
+            </div>
+          </div>
+        </div>
+        {#each toolsByGroup('rust') as tool (tool.id)}
+          <DevToolRow {tool} busy={!!devToolBusy[tool.id]} progress={devToolProgress[tool.id] || ''} color={toolColors[tool.id] || 'bg-slate-500/10 text-slate-500'}
+            onInstall={installDevTool} onUninstall={(id) => askUninstall(id, () => uninstallDevTool(id))} />
+        {/each}
+      </div>
+    </div>
+
+    <p class="text-[11px] text-[var(--color-text-secondary)] mt-4">{$t('tools.installedToPath')}</p>
   </div>
 </div>
+
+<ConfirmDialog
+  open={pendingUninstall !== null}
+  danger={true}
+  busy={uninstallBusy}
+  title={pendingUninstall ? $t('tools.confirmUninstallTitle', pendingUninstall.label) : ''}
+  message={$t('tools.confirmUninstallMsg')}
+  confirmLabel={$t('common.delete')}
+  on:confirm={confirmUninstall}
+  on:cancel={() => pendingUninstall = null}
+/>

@@ -18,9 +18,9 @@
     RestartService,
     GetServiceLogs,
     CheckPort,
-    SetServicePort,
     GetAutoStartServices,
     SetServiceAutoStart,
+    OpenServiceTerminal,
   } from '../../wailsjs/go/main/App';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { serviceInstalls, startServiceInstall, clearServiceInstall } from '../lib/stores/installs';
@@ -151,8 +151,6 @@
   let loadingVersions: boolean = false;
 
   // Port edit state
-  let editingPort: string = '';
-  let editPortValue: number = 0;
 
   async function loadServices() {
     try {
@@ -374,26 +372,17 @@
     }
   }
 
+  async function openServiceTerminal(id: string) {
+    errorMessage = '';
+    try { await OpenServiceTerminal(id); } catch (e: any) { errorMessage = `${id}: ${e?.message || e}`; }
+  }
+
   function toggleInfo(id: string) {
     if (showInfo === id) { showInfo = ''; return; }
     showInfo = id;
     showLogs = '';
   }
 
-  async function startEditPort(id: string) {
-    editingPort = id;
-    editPortValue = serviceStatuses[id]?.port || 0;
-  }
-
-  async function savePort(id: string) {
-    try {
-      await SetServicePort(id, editPortValue);
-      await loadServices();
-    } catch (e) {
-      errorMessage = `${id}: ${e}`;
-    }
-    editingPort = '';
-  }
 
   // Calling EventsOff(name) would nuke the global listener in installs.ts too,
   // so we keep per-listener unsub handles returned by EventsOn.
@@ -626,24 +615,11 @@
 
                 <!-- Row 2, Col 1: Port -->
                 {#if installed}
-                  {#if editingPort === eid}
-                    <div class="flex items-center gap-1.5 p-1 px-2 border border-primary-500/30 bg-primary-500/5 rounded-lg shadow-inner col-span-2">
-                      <span class="text-[10px] font-bold text-primary-500 uppercase tracking-tighter">{$t('services.labelPort')}</span>
-                      <input
-                        type="number"
-                        bind:value={editPortValue}
-                        class="w-16 px-1 py-0 text-xs font-mono bg-transparent border-0 focus:ring-0 text-primary-600 dark:text-primary-400 font-bold"
-                        min="1" max="65535"
-                      />
-                      <button class="text-[10px] bg-primary-500 text-white px-2 py-0.5 rounded shadow-sm hover:bg-primary-600 transition-colors font-bold" on:click={() => savePort(eid)}>OK</button>
-                      <button class="text-[10px] text-slate-400 hover:text-red-500 p-0.5" on:click={() => editingPort = ''}>✕</button>
-                    </div>
-                  {:else}
-                    <button class="group flex items-center gap-1.5 px-2 py-1 rounded-lg border border-transparent hover:border-[var(--color-border)] hover:bg-[var(--color-bg)] transition-all" on:click={() => startEditPort(eid)} title={$t('services.configure')}>
+                  {#if true}
+                    <div class="flex items-center gap-1.5 px-2 py-1">
                       <span class="text-[10px] text-[var(--color-text-secondary)] font-bold uppercase">{$t('services.labelPort')}</span>
-                      <span class="font-mono text-xs font-bold text-primary-500 group-hover:text-primary-600 tabular-nums">{port}</span>
-                      <svg class="w-3 h-3 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                    </button>
+                      <span class="font-mono text-xs font-bold text-primary-500 tabular-nums">{port}</span>
+                    </div>
 
                     <!-- Row 2, Col 2: Version (+ update badge) -->
                     {#if version !== '-'}
@@ -706,20 +682,20 @@
                     {/if}
                   </button>
                   <button
-                    class="btn-icon bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
-                    on:click={() => startEditPort(eid)}
-                    disabled={isBusy}
-                    title={$t('services.configure')}
-                  >
-                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                  </button>
-                  <button
                     class="btn-icon {showInfo === eid ? 'bg-primary-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'}"
                     on:click={() => toggleInfo(eid)}
                     disabled={isBusy}
                     title={$t('services.info')}
                   >
                     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                  </button>
+                  <button
+                    class="btn-icon bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
+                    on:click={() => openServiceTerminal(eid)}
+                    disabled={isBusy}
+                    title={$t('services.openTerminal')}
+                  >
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
                   </button>
                   <button
                     class="btn-icon bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
@@ -768,20 +744,20 @@
                     {/if}
                   </button>
                   <button
-                    class="btn-icon bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
-                    on:click={() => startEditPort(eid)}
-                    disabled={isBusy}
-                    title={$t('services.configure')}
-                  >
-                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                  </button>
-                  <button
                     class="btn-icon {showInfo === eid ? 'bg-primary-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'}"
                     on:click={() => toggleInfo(eid)}
                     disabled={isBusy}
                     title={$t('services.info')}
                   >
                     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                  </button>
+                  <button
+                    class="btn-icon bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
+                    on:click={() => openServiceTerminal(eid)}
+                    disabled={isBusy}
+                    title={$t('services.openTerminal')}
+                  >
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
                   </button>
                   <button
                     class="btn-icon bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"

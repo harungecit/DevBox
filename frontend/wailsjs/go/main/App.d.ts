@@ -6,8 +6,10 @@ import {service} from '../models';
 import {tools} from '../models';
 import {tunnel} from '../models';
 import {config} from '../models';
+import {devtools} from '../models';
 import {main} from '../models';
 import {runtime} from '../models';
+import {terminal} from '../models';
 
 export function AddProject(arg1:string,arg2:string):Promise<project.Project>;
 
@@ -62,6 +64,10 @@ export function GetDataDir():Promise<string>;
 export function GetDefaultProjectsDir():Promise<string>;
 
 export function GetDevServerLogs(arg1:string,arg2:number):Promise<Array<string>>;
+
+export function GetDevTools():Promise<Array<devtools.Status>>;
+
+export function GetFrameworkCatalog():Promise<Array<project.Framework>>;
 
 export function GetGlobalRuntime(arg1:string):Promise<string>;
 
@@ -139,6 +145,8 @@ export function InstallCloudflared():Promise<void>;
 
 export function InstallComposer():Promise<void>;
 
+export function InstallDevTool(arg1:string):Promise<void>;
+
 export function InstallPeclExtension(arg1:string,arg2:string):Promise<void>;
 
 export function InstallProxy():Promise<void>;
@@ -175,15 +183,25 @@ export function LaunchExternalTool(arg1:string,arg2:string):Promise<void>;
 
 export function ListProjects():Promise<Array<project.Project>>;
 
+export function ListTerminals():Promise<Array<terminal.Terminal>>;
+
 export function OpenAdminer():Promise<void>;
 
 export function OpenDataDir():Promise<void>;
+
+export function OpenDevTool(arg1:string):Promise<void>;
 
 export function OpenFileInEditor(arg1:string):Promise<void>;
 
 export function OpenInBrowser(arg1:string):Promise<void>;
 
 export function OpenProjectFolder(arg1:string):Promise<void>;
+
+export function OpenProjectTerminal(arg1:string):Promise<void>;
+
+export function OpenServiceTerminal(arg1:string):Promise<void>;
+
+export function OpenTerminal():Promise<void>;
 
 export function Quit():Promise<void>;
 
@@ -219,6 +237,8 @@ export function SetLanguage(arg1:string):Promise<void>;
 
 export function SetPHPIniSetting(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function SetProjectAutoStart(arg1:string,arg2:boolean):Promise<void>;
+
 export function SetProjectPort(arg1:string,arg2:number):Promise<void>;
 
 export function SetProjectPublicHostname(arg1:string,arg2:string):Promise<void>;
@@ -235,7 +255,11 @@ export function SetServiceAutoStart(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetServicePort(arg1:string,arg2:number):Promise<void>;
 
+export function SetServiceSetting(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function SetStartMinimized(arg1:boolean):Promise<void>;
+
+export function SetTerminal(arg1:string):Promise<void>;
 
 export function SetTheme(arg1:string):Promise<void>;
 
@@ -257,6 +281,8 @@ export function StopAdminerServer():Promise<void>;
 
 export function StopDevServer(arg1:string):Promise<void>;
 
+export function StopDevTool(arg1:string):Promise<void>;
+
 export function StopPHPCGI():Promise<void>;
 
 export function StopProxy():Promise<void>;
@@ -272,6 +298,8 @@ export function ToggleProjectSSL(arg1:string,arg2:boolean):Promise<void>;
 export function UninstallAdminer():Promise<void>;
 
 export function UninstallBun():Promise<void>;
+
+export function UninstallDevTool(arg1:string):Promise<void>;
 
 export function UninstallPeclExtension(arg1:string,arg2:string):Promise<void>;
 

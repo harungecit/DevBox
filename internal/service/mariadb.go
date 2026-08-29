@@ -181,7 +181,8 @@ func (m *MariaDBManager) Stop() error {
 		admin = filepath.Join(m.binDir(), platform.BinaryName("mysqladmin"))
 	}
 	if _, err := os.Stat(admin); err == nil {
-		runCommandSilent(admin, []string{"-u", "root", "shutdown"}, serviceBaseDir("mariadb"))
+		args, env := mysqlAdminEnv("mariadb")
+		runWithEnv(admin, append(args, "shutdown"), serviceBaseDir("mariadb"), env...)
 	}
 
 	return StopProcess("mariadb")

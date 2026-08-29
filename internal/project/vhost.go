@@ -76,7 +76,10 @@ func nginxLocationBlock(project Project, docRoot string, phpCgiPort int) string 
 
 // GenerateNginxVhost creates an nginx vhost config for a project.
 // httpPort is the nginx listen port (e.g. 81). If 0, defaults to 80.
-func GenerateNginxVhost(project Project, phpCgiPort int, httpPort int) error {
+// tlsUpstream means the front-door proxy terminates HTTPS on :443 and forwards
+// plain HTTP with X-Forwarded-Proto — nginx then must not bind :443 itself and
+// must not redirect (the front-door already did).
+func GenerateNginxVhost(project Project, phpCgiPort int, httpPort int, tlsUpstream bool) error {
 	base := filepath.Join(config.GetDataDir(), "services", "nginx")
 	vhostDir := filepath.Join(base, "conf", "vhosts")
 	os.MkdirAll(vhostDir, 0755)
@@ -99,7 +102,7 @@ func GenerateNginxVhost(project Project, phpCgiPort int, httpPort int) error {
 		}
 	}
 
-	if project.SSL {
+	if project.SSL && !tlsUpstream {
 		certDir := filepath.Join(config.GetDataDir(), "ssl", "certs")
 		certFile := strings.ReplaceAll(filepath.Join(certDir, project.Domain+".pem"), "\\", "/")
 		keyFile := strings.ReplaceAll(filepath.Join(certDir, project.Domain+"-key.pem"), "\\", "/")
@@ -265,16 +268,24 @@ func apacheAliases(p Project) string {
 	return out
 }
 
-// certsExist reports whether both mkcert files for a domain are present.
-func certsExist(domain string) bool {
+// CertPaths returns the mkcert certificate and key file paths for a domain.
+func CertPaths(domain string) (certFile, keyFile string) {
 	certDir := filepath.Join(config.GetDataDir(), "ssl", "certs")
-	for _, f := range []string{domain + ".pem", domain + "-key.pem"} {
-		if _, err := os.Stat(filepath.Join(certDir, f)); err != nil {
+	return filepath.Join(certDir, domain+".pem"), filepath.Join(certDir, domain+"-key.pem")
+}
+
+// CertsExist reports whether both mkcert files for a domain are present.
+func CertsExist(domain string) bool {
+	c, k := CertPaths(domain)
+	for _, f := range []string{c, k} {
+		if _, err := os.Stat(f); err != nil {
 			return false
 		}
 	}
 	return true
 }
+
+func certsExist(domain string) bool { return CertsExist(domain) }
 
 // RemoveNginxVhost removes an nginx vhost config
 func RemoveNginxVhost(projectName string) {

@@ -19,6 +19,7 @@ export interface AppConfig {
   autoStartSvcs: string[];
   proxyEnabled: boolean;
   versionCacheHours: number;
+  terminal?: string;
 }
 
 export const appConfig = writable<AppConfig>({

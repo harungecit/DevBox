@@ -241,10 +241,12 @@ func (r *RedisManager) Start() error {
 
 	base := serviceBaseDir("redis")
 	exe := filepath.Join(base, platform.BinaryName("redis-server"))
-	confFile := filepath.Join(base, "redis.conf")
 	logFile := filepath.Join(base, "logs", "redis.log")
 
-	_, err := StartProcess("redis", exe, []string{confFile}, base, logFile)
+		// The Windows builds are MSYS-based and take the service dir as their
+	// filesystem root, so absolute Windows paths ("C:\...") are unusable —
+	// the config is passed relative to the working directory (base).
+	_, err := StartProcess("redis", exe, []string{"redis.conf"}, base, logFile)
 	return err
 }
 
@@ -317,7 +319,8 @@ func (r *RedisManager) Info() ServiceInfo {
 func (r *RedisManager) writeConfig(port int) {
 	base := serviceBaseDir("redis")
 	confPath := filepath.Join(base, "redis.conf")
-	dataDir := strings.ReplaceAll(filepath.Join(base, "data"), "\\", "/")
+	// Relative to the service dir (see Start: MSYS builds can't use C:\ paths).
+	dataDir := "data"
 
 	conf := fmt.Sprintf(`# DevBox Redis Configuration
 bind 127.0.0.1
@@ -328,7 +331,7 @@ appendonly yes
 appendfilename "appendonly.aof"
 maxmemory 256mb
 maxmemory-policy allkeys-lru
-`, port, dataDir)
+%s`, port, dataDir, redisExtraConfig("redis"))
 
 	os.WriteFile(confPath, []byte(conf), 0644)
 }

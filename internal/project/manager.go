@@ -21,6 +21,9 @@ type Project struct {
 	SSL          bool   `json:"ssl"`
 	Port         int    `json:"port"`         // app dev server port (0 = served by web server for PHP/Static)
 	StartCommand string `json:"startCommand"` // custom start command (empty = auto-detect)
+	// AutoStart keeps an app-server project's dev server up: started with
+	// DevBox and restarted (with backoff) if it exits unexpectedly.
+	AutoStart bool `json:"autoStart,omitempty"`
 
 	// Runtime is the language/category the project is built on. Independent of
 	// Framework so it survives framework misdetection. Derived from Framework if
@@ -49,26 +52,6 @@ type Project struct {
 	HostsRegistered bool `json:"hostsRegistered"`
 }
 
-// RuntimeFromFramework maps a detected framework name to the underlying runtime.
-// Returns "" for unrecognized frameworks.
-func RuntimeFromFramework(framework string) string {
-	switch framework {
-	case "Laravel", "WordPress", "Symfony", "CodeIgniter", "Yii", "CakePHP", "Drupal", "PHP":
-		return "php"
-	case "Next.js", "Nuxt", "Vue", "React", "Svelte", "Angular":
-		return "node"
-	case "Django", "Python":
-		return "python"
-	case "Go":
-		return "go"
-	case "Rust":
-		return "rust"
-	case "Static":
-		return "static"
-	}
-	return ""
-}
-
 // DefaultWebserverForRuntime returns the resolved webserver choice when a project's
 // Webserver field is empty ("auto"). PHP/Static get served by a real web server;
 // app-server runtimes use their own dev server.
@@ -91,36 +74,6 @@ func (p *Project) fillDefaults() {
 	if p.Webserver == "" {
 		p.Webserver = DefaultWebserverForRuntime(p.Runtime)
 	}
-}
-
-// IsAppServer returns true if the framework runs its own HTTP server (Node, Python, Go, Rust etc.)
-func IsAppServer(framework string) bool {
-	switch framework {
-	case "Laravel", "WordPress", "Symfony", "CodeIgniter", "Yii", "CakePHP", "Drupal", "PHP", "Static", "":
-		return false
-	}
-	return true
-}
-
-// DefaultPort returns the default dev server port for a framework
-func DefaultPort(framework string) int {
-	switch framework {
-	case "Next.js":
-		return 3000
-	case "Nuxt":
-		return 3000
-	case "Vue", "React", "Svelte", "Angular":
-		return 5173
-	case "Django":
-		return 8000
-	case "Python":
-		return 8000
-	case "Go":
-		return 8080
-	case "Rust":
-		return 8080
-	}
-	return 0
 }
 
 // projectsFilePath returns the path to projects.json
@@ -184,14 +137,9 @@ func SaveProjects(projects []Project) error {
 func AddProject(projectPath, domain string) (*Project, error) {
 	name := filepath.Base(projectPath)
 	if domain == "" {
-		domain = strings.ToLower(name) + ".test"
+		domain = name
 	}
-
-	// Clean domain
-	domain = strings.ToLower(strings.TrimSpace(domain))
-	if !strings.HasSuffix(domain, ".test") && !strings.HasSuffix(domain, ".local") {
-		domain = domain + ".test"
-	}
+	domain = NormalizeDomain(domain)
 
 	framework := DetectFramework(projectPath)
 	rt := RuntimeFromFramework(framework)
@@ -244,110 +192,6 @@ func RemoveProject(name string) error {
 	return SaveProjects(filtered)
 }
 
-// DetectFramework detects the project framework by checking marker files
-func DetectFramework(projectPath string) string {
-	// Laravel
-	if fileExists(filepath.Join(projectPath, "artisan")) &&
-		fileExists(filepath.Join(projectPath, "composer.json")) {
-		return "Laravel"
-	}
-
-	// WordPress
-	if fileExists(filepath.Join(projectPath, "wp-config.php")) ||
-		fileExists(filepath.Join(projectPath, "wp-config-sample.php")) {
-		return "WordPress"
-	}
-
-	// Symfony
-	if fileExists(filepath.Join(projectPath, "symfony.lock")) {
-		return "Symfony"
-	}
-
-	// CodeIgniter 4 (spark CLI + app/Config) or 3 (system/core)
-	if fileExists(filepath.Join(projectPath, "spark")) ||
-		fileExists(filepath.Join(projectPath, "system", "core", "CodeIgniter.php")) {
-		return "CodeIgniter"
-	}
-
-	// Yii 2
-	if fileExists(filepath.Join(projectPath, "yii")) && fileExists(filepath.Join(projectPath, "composer.json")) {
-		return "Yii"
-	}
-
-	// CakePHP
-	if fileExists(filepath.Join(projectPath, "bin", "cake")) {
-		return "CakePHP"
-	}
-
-	// Drupal
-	if fileExists(filepath.Join(projectPath, "web", "core", "lib", "Drupal.php")) ||
-		fileExists(filepath.Join(projectPath, "core", "lib", "Drupal.php")) {
-		return "Drupal"
-	}
-
-	// Next.js
-	if fileExists(filepath.Join(projectPath, "next.config.js")) ||
-		fileExists(filepath.Join(projectPath, "next.config.mjs")) ||
-		fileExists(filepath.Join(projectPath, "next.config.ts")) {
-		return "Next.js"
-	}
-
-	// Nuxt
-	if fileExists(filepath.Join(projectPath, "nuxt.config.js")) ||
-		fileExists(filepath.Join(projectPath, "nuxt.config.ts")) {
-		return "Nuxt"
-	}
-
-	// Vue
-	if fileExists(filepath.Join(projectPath, "vue.config.js")) ||
-		fileExists(filepath.Join(projectPath, "vite.config.ts")) {
-		return "Vue"
-	}
-
-	// React (CRA)
-	if fileExists(filepath.Join(projectPath, "package.json")) {
-		data, _ := os.ReadFile(filepath.Join(projectPath, "package.json"))
-		if strings.Contains(string(data), "\"react\"") {
-			return "React"
-		}
-		if strings.Contains(string(data), "\"svelte\"") {
-			return "Svelte"
-		}
-		if strings.Contains(string(data), "\"@angular/core\"") {
-			return "Angular"
-		}
-	}
-
-	// Go
-	if fileExists(filepath.Join(projectPath, "go.mod")) {
-		return "Go"
-	}
-
-	// Rust
-	if fileExists(filepath.Join(projectPath, "Cargo.toml")) {
-		return "Rust"
-	}
-
-	// Python (Django / Flask)
-	if fileExists(filepath.Join(projectPath, "manage.py")) {
-		return "Django"
-	}
-	if fileExists(filepath.Join(projectPath, "requirements.txt")) {
-		return "Python"
-	}
-
-	// PHP (generic)
-	if fileExists(filepath.Join(projectPath, "composer.json")) {
-		return "PHP"
-	}
-
-	// Static HTML
-	if fileExists(filepath.Join(projectPath, "index.html")) {
-		return "Static"
-	}
-
-	return ""
-}
 
 // UpdateProjectDomain updates domain for a project
 func UpdateProjectDomain(name, domain string) error {
@@ -481,4 +325,38 @@ func DocumentRoot(projectPath string) string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// NormalizeDomain turns a free-form name ("Personal Project.Manager") into a
+// valid local host name ("personal-project-manager.test"). A ".test"/".local"
+// suffix is preserved; any other suffix is treated as part of the label.
+func NormalizeDomain(in string) string {
+	d := strings.ToLower(strings.TrimSpace(in))
+	suffix := ".test"
+	for _, s := range []string{".test", ".local"} {
+		if strings.HasSuffix(d, s) {
+			suffix = s
+			d = strings.TrimSuffix(d, s)
+			break
+		}
+	}
+	var b strings.Builder
+	lastDash := true // suppress leading dashes
+	for _, r := range d {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	label := strings.Trim(b.String(), "-")
+	if label == "" {
+		label = "project"
+	}
+	return label + suffix
 }

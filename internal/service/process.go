@@ -84,13 +84,7 @@ func StopProcess(name string) error {
 		return fmt.Errorf("invalid PID file for %s", name)
 	}
 
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		os.Remove(pidFile)
-		return nil
-	}
-
-	err = proc.Kill()
+	err = platform.KillProcessTree(pid)
 	os.Remove(pidFile)
 
 	if err != nil {

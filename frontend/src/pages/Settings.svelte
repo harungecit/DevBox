@@ -4,6 +4,7 @@
   import { theme, applyTheme, appConfig, loadConfig } from '../lib/stores/app';
   import {
     SetLanguage, SetTheme, SetAutoStart, IsAutoStartEnabled, SetStartMinimized, SetCloseToTray,
+    ListTerminals, SetTerminal, OpenTerminal,
     GetDataDir, OpenDataDir, GetMigrationNotice, Quit,
     GetCloudflareStatus, VerifyCloudflareToken, ConfigureCloudflare, DisconnectCloudflare,
     GetAppVersion, CheckForUpdate, GetLastUpdateCheck, InstallAppUpdate, OpenInBrowser,
@@ -36,6 +37,20 @@
   let autoStartEnabled = false;
   let startMinimized = false;
   let closeToTray = true;
+
+  // Terminal preference
+  interface TerminalInfo { id: string; name: string; shell: string; path: string; installed: boolean; }
+  let terminals: TerminalInfo[] = [];
+  let terminalPref = '';
+  async function loadTerminals() {
+    try { terminals = (await ListTerminals()) || []; } catch { terminals = []; }
+    terminalPref = $appConfig.terminal || '';
+  }
+  async function changeTerminal(e: Event) {
+    const id = (e.currentTarget as HTMLSelectElement).value;
+    terminalPref = id;
+    try { await SetTerminal(id); } catch (err) { console.error(err); }
+  }
   let dataDir = '';
   let migration: { migrated: boolean; from: string; to: string } | null = null;
   let errorMessage = '';
@@ -55,6 +70,7 @@
     await loadConfig();
     startMinimized = $appConfig.startMinimized;
     closeToTray = $appConfig.closeToTray;
+    loadTerminals();
     try { autoStartEnabled = await IsAutoStartEnabled(); } catch { autoStartEnabled = $appConfig.autoStart; }
     try { dataDir = await GetDataDir(); } catch { dataDir = $appConfig.dataDir; }
     try { const m = await GetMigrationNotice(); if (m?.migrated) migration = m; } catch { /* ignore */ }
@@ -187,6 +203,25 @@
           </button>
         {/each}
       </div>
+    </div>
+  </div>
+
+  <!-- Terminal -->
+  <div class="card">
+    <div class="flex items-start justify-between gap-4">
+      <div class="min-w-0">
+        <h3 class="text-sm font-bold">{$t('settings.terminal')}</h3>
+        <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">{$t('settings.terminalDesc')}</p>
+      </div>
+      <button class="btn-secondary text-xs flex-shrink-0" on:click={() => OpenTerminal()}>{$t('settings.terminalTest')}</button>
+    </div>
+    <div class="mt-3">
+      <select class="w-full max-w-md px-2 py-1.5 text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]" on:change={changeTerminal}>
+        <option value="" selected={terminalPref === ''}>{$t('settings.terminalAuto', terminals.find(t => t.installed)?.name || '—')}</option>
+        {#each terminals as tm}
+          <option value={tm.id} selected={terminalPref === tm.id} disabled={!tm.installed}>{tm.name}{tm.installed ? '' : ` — ${$t('settings.terminalNotFound')}`}</option>
+        {/each}
+      </select>
     </div>
   </div>
 

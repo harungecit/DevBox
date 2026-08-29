@@ -190,7 +190,8 @@ func (m *MySQLManager) Stop() error {
 
 	mysqladmin := filepath.Join(m.binDir(), platform.BinaryName("mysqladmin"))
 	if _, err := os.Stat(mysqladmin); err == nil {
-		runCommandSilent(mysqladmin, []string{"-u", "root", "shutdown"}, serviceBaseDir("mysql"))
+		args, env := mysqlAdminEnv("mysql")
+		runWithEnv(mysqladmin, append(args, "shutdown"), serviceBaseDir("mysql"), env...)
 	}
 
 	return StopProcess("mysql")

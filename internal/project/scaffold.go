@@ -38,16 +38,27 @@ var templates = []FrameworkTemplate{
 	{ID: "laravel", Name: "Laravel", Category: "php", RequiredRuntime: "php", RequiresTool: "composer"},
 	{ID: "symfony", Name: "Symfony", Category: "php", RequiredRuntime: "php", RequiresTool: "composer"},
 	{ID: "wordpress", Name: "WordPress", Category: "php", RequiredRuntime: "php", RequiresTool: "composer"},
+	{ID: "codeigniter", Name: "CodeIgniter", Category: "php", RequiredRuntime: "php", RequiresTool: "composer"},
+	{ID: "slim", Name: "Slim", Category: "php", RequiredRuntime: "php", RequiresTool: "composer"},
+	{ID: "cakephp", Name: "CakePHP", Category: "php", RequiredRuntime: "php", RequiresTool: "composer"},
+	{ID: "yii", Name: "Yii", Category: "php", RequiredRuntime: "php", RequiresTool: "composer"},
 	{ID: "php", Name: "PHP", Category: "php", RequiredRuntime: "php", RequiresTool: "composer"},
 	{ID: "nextjs", Name: "Next.js", Category: "node", RequiredRuntime: "node"},
 	{ID: "nuxt", Name: "Nuxt", Category: "node", RequiredRuntime: "node"},
+	{ID: "nestjs", Name: "NestJS", Category: "node", RequiredRuntime: "node"},
+	{ID: "astro", Name: "Astro", Category: "node", RequiredRuntime: "node"},
+	{ID: "sveltekit", Name: "SvelteKit", Category: "node", RequiredRuntime: "node"},
 	{ID: "vue", Name: "Vue", Category: "node", RequiredRuntime: "node"},
 	{ID: "react", Name: "React", Category: "node", RequiredRuntime: "node"},
 	{ID: "svelte", Name: "Svelte", Category: "node", RequiredRuntime: "node"},
 	{ID: "angular", Name: "Angular", Category: "node", RequiredRuntime: "node"},
+	{ID: "express", Name: "Express", Category: "node", RequiredRuntime: "node"},
 	{ID: "go", Name: "Go", Category: "go", RequiredRuntime: "go"},
+	{ID: "gin", Name: "Gin", Category: "go", RequiredRuntime: "go"},
 	{ID: "rust", Name: "Rust", Category: "rust", RequiredRuntime: "rust"},
 	{ID: "django", Name: "Django", Category: "python", RequiredRuntime: "python"},
+	{ID: "flask", Name: "Flask", Category: "python", RequiredRuntime: "python"},
+	{ID: "fastapi", Name: "FastAPI", Category: "python", RequiredRuntime: "python"},
 	{ID: "static", Name: "Static HTML", Category: "static"},
 }
 
@@ -252,22 +263,47 @@ func scaffoldWithCommand(tmpl *FrameworkTemplate, parentDir, projectName string,
 	var cmdName string
 	var args []string
 
+	composerCreate := func(pkg string) {
+		cmdName = filepath.Join(binDir, platform.BinaryName("php"))
+		args = []string{filepath.Join(binDir, "composer.phar"), "create-project", pkg, projectName}
+	}
+
 	switch tmpl.ID {
 	case "laravel":
-		phpExe := filepath.Join(binDir, platform.BinaryName("php"))
-		composerPhar := filepath.Join(binDir, "composer.phar")
-		cmdName = phpExe
-		args = []string{composerPhar, "create-project", "laravel/laravel", projectName}
+		composerCreate("laravel/laravel")
 	case "symfony":
-		phpExe := filepath.Join(binDir, platform.BinaryName("php"))
-		composerPhar := filepath.Join(binDir, "composer.phar")
-		cmdName = phpExe
-		args = []string{composerPhar, "create-project", "symfony/skeleton", projectName}
+		composerCreate("symfony/skeleton")
 	case "wordpress":
-		phpExe := filepath.Join(binDir, platform.BinaryName("php"))
-		composerPhar := filepath.Join(binDir, "composer.phar")
-		cmdName = phpExe
-		args = []string{composerPhar, "create-project", "johnpbloch/wordpress", projectName}
+		composerCreate("johnpbloch/wordpress")
+	case "codeigniter":
+		composerCreate("codeigniter4/appstarter")
+	case "slim":
+		composerCreate("slim/slim-skeleton")
+	case "cakephp":
+		composerCreate("cakephp/app")
+	case "yii":
+		composerCreate("yiisoft/yii2-app-basic")
+	case "nestjs":
+		cmdName = filepath.Join(binDir, platform.ScriptName("npx"))
+		args = []string{"@nestjs/cli@latest", "new", projectName, "--skip-git", "--package-manager", "npm"}
+	case "astro":
+		cmdName = filepath.Join(binDir, platform.ScriptName("npm"))
+		args = []string{"create", "astro@latest", projectName, "--", "--template", "minimal", "--install", "--no-git", "--yes"}
+	case "sveltekit":
+		cmdName = filepath.Join(binDir, platform.ScriptName("npx"))
+		args = []string{"sv@latest", "create", projectName, "--template", "minimal", "--types", "ts", "--no-add-ons", "--install", "npm"}
+	case "express":
+		return scaffoldFilesThen(parentDir, projectName, starterExpress(projectName),
+			filepath.Join(binDir, platform.ScriptName("npm")), []string{"install"}, binDir, progress)
+	case "gin":
+		return scaffoldFilesThen(parentDir, projectName, starterGin(projectName),
+			filepath.Join(binDir, platform.BinaryName("go")), []string{"get", "github.com/gin-gonic/gin@latest"}, binDir, progress)
+	case "flask":
+		return scaffoldFilesThen(parentDir, projectName, starterFlask(),
+			filepath.Join(binDir, platform.BinaryName("python")), []string{"-m", "pip", "install", "-r", "requirements.txt"}, binDir, progress)
+	case "fastapi":
+		return scaffoldFilesThen(parentDir, projectName, starterFastAPI(),
+			filepath.Join(binDir, platform.BinaryName("python")), []string{"-m", "pip", "install", "-r", "requirements.txt"}, binDir, progress)
 	case "nextjs":
 		cmdName = filepath.Join(binDir, platform.ScriptName("npx"))
 		args = []string{"create-next-app@latest", projectName, "--use-npm"}
@@ -324,6 +360,51 @@ func scaffoldWithCommand(tmpl *FrameworkTemplate, parentDir, projectName string,
 		return fmt.Errorf("command failed: %s", err)
 	}
 
+	return nil
+}
+
+// scaffoldFilesThen writes a set of starter files into a new project folder and
+// then runs one command inside it (npm install, pip install, go get…), streaming
+// its output as progress. Used for frameworks without a non-interactive
+// official generator.
+func scaffoldFilesThen(parentDir, projectName string, files map[string]string, cmdName string, args []string, binDir string, progress chan<- ScaffoldProgress) error {
+	dir := filepath.Join(parentDir, projectName)
+	if _, err := os.Stat(dir); err == nil {
+		return fmt.Errorf("folder already exists: %s", dir)
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	for name, body := range files {
+		p := filepath.Join(dir, filepath.FromSlash(name))
+		os.MkdirAll(filepath.Dir(p), 0755)
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			return err
+		}
+	}
+	progress <- ScaffoldProgress{Percent: 30, Message: "Starter files written"}
+
+	cmd := exec.Command(cmdName, args...)
+	cmd.Dir = dir
+	cmd.Env = buildEnv(binDir)
+	platform.SetProcessAttrs(cmd, true, true)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stderr = cmd.Stdout
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start: %s", err)
+	}
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		if line := strings.TrimSpace(scanner.Text()); line != "" {
+			progress <- ScaffoldProgress{Percent: -1, Message: line}
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("command failed: %s", err)
+	}
 	return nil
 }
 

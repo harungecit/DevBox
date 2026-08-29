@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -159,6 +160,20 @@ func (w *windowsPlatform) SetProcessAttrs(cmd *exec.Cmd, createGroup bool, hide 
 		attrs.HideWindow = true
 	}
 	cmd.SysProcAttr = attrs
+}
+
+// KillProcessTree uses taskkill /T so children of wrapper processes
+// (npm .cmd shims → node, nginx master → workers) die with their parent.
+func (w *windowsPlatform) KillProcessTree(pid int) error {
+	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		if !w.IsProcessRunning(pid) {
+			return nil // already gone
+		}
+		return fmt.Errorf("taskkill: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func (w *windowsPlatform) IsProcessRunning(pid int) bool {

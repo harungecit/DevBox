@@ -37,6 +37,9 @@ type Config struct {
 	// reverse proxy that routes *.test domains to per-project backends) starts
 	// with DevBox. Off by default — first run needs an explicit Enable click.
 	ProxyEnabled bool `json:"proxyEnabled"`
+	// Terminal is the preferred terminal id from terminal.List() ("" = auto:
+	// Windows Terminal → PowerShell 7 → Git Bash…; macOS: iTerm → Terminal).
+	Terminal string `json:"terminal,omitempty"`
 	// VersionCacheHours is how long fetched remote version lists (runtimes and
 	// services) are considered fresh before DevBox re-fetches them in the background.
 	VersionCacheHours int `json:"versionCacheHours"`

@@ -36,6 +36,7 @@ export namespace config {
 	    activeRuntimes: Record<string, string>;
 	    autoStartSvcs: string[];
 	    proxyEnabled: boolean;
+	    terminal?: string;
 	    versionCacheHours: number;
 	    phpCgiPorts: Record<string, number>;
 	    cloudflare: CloudflareConfig;
@@ -55,6 +56,7 @@ export namespace config {
 	        this.activeRuntimes = source["activeRuntimes"];
 	        this.autoStartSvcs = source["autoStartSvcs"];
 	        this.proxyEnabled = source["proxyEnabled"];
+	        this.terminal = source["terminal"];
 	        this.versionCacheHours = source["versionCacheHours"];
 	        this.phpCgiPorts = source["phpCgiPorts"];
 	        this.cloudflare = this.convertValues(source["cloudflare"], CloudflareConfig);
@@ -77,6 +79,55 @@ export namespace config {
 		    }
 		    return a;
 		}
+	}
+
+}
+
+export namespace devtools {
+	
+	export class Status {
+	    id: string;
+	    name: string;
+	    group: string;
+	    runtime: string;
+	    kind: string;
+	    pkg: string;
+	    bin: string;
+	    desc: string;
+	    homepage: string;
+	    port: number;
+	    forServices: string[];
+	    installed: boolean;
+	    version: string;
+	    running: boolean;
+	    url: string;
+	    available: boolean;
+	    serviceName: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.group = source["group"];
+	        this.runtime = source["runtime"];
+	        this.kind = source["kind"];
+	        this.pkg = source["pkg"];
+	        this.bin = source["bin"];
+	        this.desc = source["desc"];
+	        this.homepage = source["homepage"];
+	        this.port = source["port"];
+	        this.forServices = source["forServices"];
+	        this.installed = source["installed"];
+	        this.version = source["version"];
+	        this.running = source["running"];
+	        this.url = source["url"];
+	        this.available = source["available"];
+	        this.serviceName = source["serviceName"];
+	    }
 	}
 
 }
@@ -132,6 +183,7 @@ export namespace main {
 	export class ConnectionEntry {
 	    label: string;
 	    value: string;
+	    key?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnectionEntry(source);
@@ -141,6 +193,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.label = source["label"];
 	        this.value = source["value"];
+	        this.key = source["key"];
 	    }
 	}
 	export class MigrationNotice {
@@ -164,6 +217,7 @@ export namespace main {
 	    running: boolean;
 	    enabled: boolean;
 	    port: number;
+	    httpsPort: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProxyStatus(source);
@@ -175,6 +229,7 @@ export namespace main {
 	        this.running = source["running"];
 	        this.enabled = source["enabled"];
 	        this.port = source["port"];
+	        this.httpsPort = source["httpsPort"];
 	    }
 	}
 	export class RuntimeVersionInfo {
@@ -299,6 +354,24 @@ export namespace project {
 	        this.value = source["value"];
 	    }
 	}
+	export class Framework {
+	    name: string;
+	    runtime: string;
+	    appServer: boolean;
+	    port: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Framework(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.runtime = source["runtime"];
+	        this.appServer = source["appServer"];
+	        this.port = source["port"];
+	    }
+	}
 	export class FrameworkTemplate {
 	    id: string;
 	    name: string;
@@ -331,6 +404,7 @@ export namespace project {
 	    ssl: boolean;
 	    port: number;
 	    startCommand: string;
+	    autoStart?: boolean;
 	    runtime?: string;
 	    runtimeVersion?: string;
 	    webserver?: string;
@@ -350,6 +424,7 @@ export namespace project {
 	        this.ssl = source["ssl"];
 	        this.port = source["port"];
 	        this.startCommand = source["startCommand"];
+	        this.autoStart = source["autoStart"];
 	        this.runtime = source["runtime"];
 	        this.runtimeVersion = source["runtimeVersion"];
 	        this.webserver = source["webserver"];
@@ -463,6 +538,31 @@ export namespace service {
 	        this.port = source["port"];
 	        this.available = source["available"];
 	        this.message = source["message"];
+	    }
+	}
+
+}
+
+export namespace terminal {
+	
+	export class Terminal {
+	    id: string;
+	    name: string;
+	    shell: string;
+	    path: string;
+	    installed: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Terminal(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.shell = source["shell"];
+	        this.path = source["path"];
+	        this.installed = source["installed"];
 	    }
 	}
 

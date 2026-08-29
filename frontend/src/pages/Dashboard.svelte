@@ -10,6 +10,7 @@
     StartService,
     StopService,
     GetProxyStatus,
+    OpenTerminal,
     InstallProxy,
     StartProxy,
     StopProxy,
@@ -37,8 +38,9 @@
     running: boolean;
     enabled: boolean;
     port: number;
+    httpsPort: number;
   }
-  let proxyStatus: ProxyStatus = { installed: false, running: false, enabled: false, port: 80 };
+  let proxyStatus: ProxyStatus = { installed: false, running: false, enabled: false, port: 80, httpsPort: 443 };
   let proxyBusy: boolean = false;
   let proxyError: string = '';
 
@@ -152,6 +154,10 @@
       <h2 class="text-2xl font-bold">{$t('dashboard.title')}</h2>
       <p class="text-[var(--color-text-secondary)] mt-1">{$t('dashboard.welcome')}</p>
     </div>
+    <button class="btn-secondary text-xs flex items-center gap-1.5" on:click={() => OpenTerminal()} title={$t('dashboard.openTerminalHint')}>
+      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      {$t('dashboard.openTerminal')}
+    </button>
     <button class="btn-secondary text-xs" on:click={loadData}>
       <svg class="w-3.5 h-3.5 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
       {$t('common.refresh')}
@@ -169,7 +175,7 @@
           <div class="flex items-center gap-2 flex-wrap">
             <h3 class="font-bold text-base">{$t('dashboard.proxyTitle')}</h3>
             {#if proxyStatus.running}
-              <span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold uppercase">{$t('dashboard.proxyRunningOnPort', proxyStatus.port)}</span>
+              <span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold uppercase">{$t('dashboard.proxyRunningOnPort', proxyStatus.port, proxyStatus.httpsPort)}</span>
             {:else if proxyStatus.installed}
               <span class="text-[10px] px-1.5 py-0.5 bg-slate-500/10 text-slate-500 rounded border border-slate-500/20 font-bold uppercase">{$t('dashboard.proxyStopped')}</span>
             {:else}

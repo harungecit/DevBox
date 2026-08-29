@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"sort"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"DevBox/internal/config"
+	"DevBox/internal/devtools"
 	"DevBox/internal/i18n"
 	"DevBox/internal/pathenv"
 	"DevBox/internal/platform"
@@ -52,6 +55,10 @@ type App struct {
 	// vhostMu serialises vhost regeneration (startup, project edits, runtime
 	// switches can all trigger it concurrently).
 	vhostMu sync.Mutex
+
+	// restartLog records watchdog restarts per project (see onDevServerExit).
+	restartMu  sync.Mutex
+	restartLog map[string][]time.Time
 }
 
 // NewApp creates a new App application struct
@@ -69,6 +76,7 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 	tunnel.StopAllTunnels()
 	project.StopAllDevServers()
+	devtools.StopAll()
 	runtime.StopPHPCGI()
 	service.StopAll()
 	tools.StopAdminerServer()
@@ -173,6 +181,11 @@ func (a *App) startup(ctx context.Context) {
 
 	// Auto-start configured services
 	go a.autoStartServices()
+
+	// Keep app-server projects marked AUTO running: start them now and let
+	// the exit hook restart them if they crash.
+	project.OnDevServerExit = a.onDevServerExit
+	go a.autoStartDevServers()
 
 	// Auto-start the front-door proxy if it's installed and the user enabled it.
 	// Failures are logged but non-fatal — DevBox keeps running without proxy.
@@ -725,6 +738,64 @@ func (a *App) CheckPort(port int) service.PortStatus {
 }
 
 // SetServicePort changes the port for an installed service
+// shown renders a password for the info panel.
+func shown(pw string) string {
+	if pw == "" {
+		return "(none)"
+	}
+	return pw
+}
+
+func userInfo(user, pw string) string {
+	if pw == "" {
+		return user
+	}
+	return user + ":" + url.PathEscape(pw)
+}
+
+func redisUserInfo(pw string) string {
+	if pw == "" {
+		return ""
+	}
+	return ":" + url.PathEscape(pw) + "@"
+}
+
+func pwFlag(pw string) string {
+	if pw == "" {
+		return ""
+	}
+	return " -p"
+}
+
+func aFlag(pw string) string {
+	if pw == "" {
+		return ""
+	}
+	return " -a " + pw
+}
+
+// SetServiceSetting edits one connection setting from the info panel.
+// key: port | user | password | databases.
+func (a *App) SetServiceSetting(name, key, value string) error {
+	var err error
+	if key == "port" {
+		p, convErr := strconv.Atoi(strings.TrimSpace(value))
+		if convErr != nil || p < 1 || p > 65535 {
+			return fmt.Errorf("invalid port")
+		}
+		err = a.SetServicePort(name, p)
+	} else {
+		err = service.SetSetting(name, key, value)
+	}
+	if err != nil {
+		return err
+	}
+	if a.ctx != nil {
+		wailsRuntime.EventsEmit(a.ctx, "services:changed", map[string]interface{}{"name": name})
+	}
+	return nil
+}
+
 func (a *App) SetServicePort(name string, port int) error {
 	mgr, ok := service.Registry[name]
 	if !ok {
@@ -804,7 +875,7 @@ func (a *App) regenerateAllVhosts() {
 		switch ws {
 		case "nginx":
 			if mgr, ok := service.Registry["nginx"]; ok && mgr.IsInstalled() {
-				project.GenerateNginxVhost(p, phpPort, mgr.Port())
+				project.GenerateNginxVhost(p, phpPort, mgr.Port(), proxy.TLSAtFrontDoor())
 				touched["nginx"] = true
 			}
 		case "apache":
@@ -1077,6 +1148,9 @@ type ConfigFileEntry struct {
 type ConnectionEntry struct {
 	Label string `json:"label"`
 	Value string `json:"value"`
+	// Key names an editable setting ("port", "user", "password", "databases");
+	// empty means read-only.
+	Key string `json:"key,omitempty"`
 }
 
 // WebLinkEntry represents a web link to open in browser
@@ -1101,13 +1175,17 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 
 	port := mgr.Port()
 	baseDir := filepath.Join(config.GetDataDir(), "services", name)
+	pgUser, pgPass := service.Credentials("postgres")
+	myUser, myPass := service.Credentials(name)
+	_, kvPass := service.Credentials(name)
+	kvDBs := service.RedisDatabases(name)
 
 	switch name {
 	case "nginx":
 		return ServiceDetailInfo{
 			ConnectionInfo: []ConnectionEntry{
 				{Label: "Host", Value: "127.0.0.1"},
-				{Label: "Port", Value: fmt.Sprintf("%d", port)},
+				{Label: "Port", Value: fmt.Sprintf("%d", port), Key: "port"},
 				{Label: "Document Root", Value: filepath.Join(baseDir, "html")},
 			},
 			ConfigFiles: []ConfigFileEntry{
@@ -1122,7 +1200,7 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 		return ServiceDetailInfo{
 			ConnectionInfo: []ConnectionEntry{
 				{Label: "Host", Value: "127.0.0.1"},
-				{Label: "Port", Value: fmt.Sprintf("%d", port)},
+				{Label: "Port", Value: fmt.Sprintf("%d", port), Key: "port"},
 				{Label: "Document Root", Value: filepath.Join(baseDir, "htdocs")},
 			},
 			ConfigFiles: []ConfigFileEntry{
@@ -1137,7 +1215,7 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 		return ServiceDetailInfo{
 			ConnectionInfo: []ConnectionEntry{
 				{Label: "Host", Value: "127.0.0.1"},
-				{Label: "Port", Value: fmt.Sprintf("%d", port)},
+				{Label: "Port", Value: fmt.Sprintf("%d", port), Key: "port"},
 				{Label: "Document Root", Value: filepath.Join(baseDir, "html")},
 			},
 			ConfigFiles: []ConfigFileEntry{
@@ -1152,7 +1230,7 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 		return ServiceDetailInfo{
 			ConnectionInfo: []ConnectionEntry{
 				{Label: "Host", Value: "127.0.0.1"},
-				{Label: "Port", Value: fmt.Sprintf("%d", port)},
+				{Label: "Port", Value: fmt.Sprintf("%d", port), Key: "port"},
 				{Label: "Document Root", Value: filepath.Join(baseDir, "html")},
 			},
 			ConfigFiles: []ConfigFileEntry{
@@ -1167,10 +1245,10 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 		return ServiceDetailInfo{
 			ConnectionInfo: []ConnectionEntry{
 				{Label: "Host", Value: "127.0.0.1"},
-				{Label: "Port", Value: fmt.Sprintf("%d", port)},
-				{Label: "User", Value: "postgres"},
-				{Label: "Password", Value: "(none)"},
-				{Label: "URI", Value: fmt.Sprintf("postgresql://postgres@127.0.0.1:%d/postgres", port)},
+				{Label: "Port", Value: fmt.Sprintf("%d", port), Key: "port"},
+				{Label: "User", Value: pgUser, Key: "user"},
+				{Label: "Password", Value: shown(pgPass), Key: "password"},
+				{Label: "URI", Value: fmt.Sprintf("postgresql://%s@127.0.0.1:%d/postgres", userInfo(pgUser, pgPass), port)},
 			},
 			ConfigFiles: []ConfigFileEntry{
 				{Label: "postgresql.conf", Path: filepath.Join(baseDir, "data", "postgresql.conf")},
@@ -1182,10 +1260,10 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 		return ServiceDetailInfo{
 			ConnectionInfo: []ConnectionEntry{
 				{Label: "Host", Value: "127.0.0.1"},
-				{Label: "Port", Value: fmt.Sprintf("%d", port)},
-				{Label: "User", Value: "root"},
-				{Label: "Password", Value: "(none)"},
-				{Label: "CLI", Value: fmt.Sprintf("mysql -u root -h 127.0.0.1 -P %d", port)},
+				{Label: "Port", Value: fmt.Sprintf("%d", port), Key: "port"},
+				{Label: "User", Value: myUser, Key: "user"},
+				{Label: "Password", Value: shown(myPass), Key: "password"},
+				{Label: "CLI", Value: fmt.Sprintf("mysql -u %s%s -h 127.0.0.1 -P %d", myUser, pwFlag(myPass), port)},
 			},
 			ConfigFiles: []ConfigFileEntry{
 				{Label: service.MysqlConfigName(), Path: filepath.Join(baseDir, service.MysqlConfigName())},
@@ -1196,10 +1274,10 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 		return ServiceDetailInfo{
 			ConnectionInfo: []ConnectionEntry{
 				{Label: "Host", Value: "127.0.0.1"},
-				{Label: "Port", Value: fmt.Sprintf("%d", port)},
-				{Label: "User", Value: "root"},
-				{Label: "Password", Value: "(none)"},
-				{Label: "CLI", Value: fmt.Sprintf("mysql -u root -h 127.0.0.1 -P %d", port)},
+				{Label: "Port", Value: fmt.Sprintf("%d", port), Key: "port"},
+				{Label: "User", Value: myUser, Key: "user"},
+				{Label: "Password", Value: shown(myPass), Key: "password"},
+				{Label: "CLI", Value: fmt.Sprintf("mysql -u %s%s -h 127.0.0.1 -P %d", myUser, pwFlag(myPass), port)},
 			},
 			ConfigFiles: []ConfigFileEntry{
 				{Label: service.MysqlConfigName(), Path: filepath.Join(baseDir, service.MysqlConfigName())},
@@ -1210,7 +1288,7 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 		return ServiceDetailInfo{
 			ConnectionInfo: []ConnectionEntry{
 				{Label: "Host", Value: "127.0.0.1"},
-				{Label: "Port", Value: fmt.Sprintf("%d", port)},
+				{Label: "Port", Value: fmt.Sprintf("%d", port), Key: "port"},
 				{Label: "URI", Value: fmt.Sprintf("mongodb://127.0.0.1:%d", port)},
 			},
 			ConfigFiles: []ConfigFileEntry{
@@ -1222,10 +1300,11 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 		return ServiceDetailInfo{
 			ConnectionInfo: []ConnectionEntry{
 				{Label: "Host", Value: "127.0.0.1"},
-				{Label: "Port", Value: fmt.Sprintf("%d", port)},
-				{Label: "CLI", Value: fmt.Sprintf("redis-cli -h 127.0.0.1 -p %d", port)},
-				{Label: "URI", Value: fmt.Sprintf("redis://127.0.0.1:%d/0", port)},
-				{Label: "Databases", Value: "16 (0-15)"},
+				{Label: "Port", Value: fmt.Sprintf("%d", port), Key: "port"},
+				{Label: "Password", Value: shown(kvPass), Key: "password"},
+				{Label: "CLI", Value: fmt.Sprintf("redis-cli -h 127.0.0.1 -p %d%s", port, aFlag(kvPass))},
+				{Label: "URI", Value: fmt.Sprintf("redis://%s127.0.0.1:%d/0", redisUserInfo(kvPass), port)},
+				{Label: "Databases", Value: fmt.Sprintf("%d (0-%d)", kvDBs, kvDBs-1), Key: "databases"},
 			},
 			ConfigFiles: []ConfigFileEntry{
 				{Label: "redis.conf", Path: filepath.Join(baseDir, "redis.conf")},
@@ -1236,10 +1315,11 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 		return ServiceDetailInfo{
 			ConnectionInfo: []ConnectionEntry{
 				{Label: "Host", Value: "127.0.0.1"},
-				{Label: "Port", Value: fmt.Sprintf("%d", port)},
-				{Label: "CLI", Value: fmt.Sprintf("valkey-cli -h 127.0.0.1 -p %d", port)},
-				{Label: "URI", Value: fmt.Sprintf("redis://127.0.0.1:%d/0", port)},
-				{Label: "Databases", Value: "16 (0-15)"},
+				{Label: "Port", Value: fmt.Sprintf("%d", port), Key: "port"},
+				{Label: "Password", Value: shown(kvPass), Key: "password"},
+				{Label: "CLI", Value: fmt.Sprintf("valkey-cli -h 127.0.0.1 -p %d%s", port, aFlag(kvPass))},
+				{Label: "URI", Value: fmt.Sprintf("redis://%s127.0.0.1:%d/0", redisUserInfo(kvPass), port)},
+				{Label: "Databases", Value: fmt.Sprintf("%d (0-%d)", kvDBs, kvDBs-1), Key: "databases"},
 			},
 			ConfigFiles: []ConfigFileEntry{
 				{Label: "valkey.conf", Path: filepath.Join(baseDir, "valkey.conf")},
@@ -1252,7 +1332,7 @@ func (a *App) GetServiceDetails(name string) ServiceDetailInfo {
 		return ServiceDetailInfo{
 			ConnectionInfo: []ConnectionEntry{
 				{Label: "SMTP Host", Value: "127.0.0.1"},
-				{Label: "SMTP Port", Value: fmt.Sprintf("%d", smtpPort)},
+				{Label: "SMTP Port", Value: fmt.Sprintf("%d", smtpPort), Key: "port"},
 				{Label: "Web UI Port", Value: fmt.Sprintf("%d", uiPort)},
 			},
 			WebLinks: []WebLinkEntry{
@@ -1667,11 +1747,23 @@ func (a *App) provisionProject(name string) {
 		if !p.HostsRegistered {
 			if err := project.AddHostsEntry(p.Domain); err != nil {
 				debugLog("provision %s: hosts entry failed: %v", name, err)
+				a.projectWarning(name, "projects.warnHosts", p.Domain, err.Error())
+			}
+		}
+		viaDevServer := project.ResolveWebserver(p) == "devserver"
+		if viaDevServer {
+			// App-server projects (Next.js, Django, Go…) have no web-server vhost:
+			// the only thing that can answer on their .test domain is the
+			// front-door proxy. Bring it up so the domain works out of the box.
+			if err := a.ensureProxy(); err != nil {
+				debugLog("provision %s: front-door failed: %v", name, err)
+				a.projectWarning(name, "projects.warnFrontDoor", p.Domain, err.Error())
 			}
 		}
 		if !p.SSL {
 			if err := project.SetupProjectSSL(p.Domain); err != nil {
 				debugLog("provision %s: ssl failed: %v", name, err)
+				a.projectWarning(name, "projects.warnSSL", p.Domain, err.Error())
 			} else {
 				projects[i].SSL = true
 				project.SaveProjects(projects)
@@ -1681,6 +1773,51 @@ func (a *App) provisionProject(name string) {
 		break
 	}
 	a.regenerateAllVhosts()
+}
+
+// ensureProxy installs (if needed) and starts the front-door proxy, and marks
+// it enabled so it comes back on the next launch. No-op when already running.
+func (a *App) ensureProxy() error {
+	if proxy.IsRunning() {
+		return nil
+	}
+	if !proxy.IsInstalled() {
+		if err := proxy.Install(); err != nil {
+			return err
+		}
+	}
+	return a.startProxyWithVhosts()
+}
+
+// startProxyWithVhosts flips ProxyEnabled on, rewrites the web-server vhosts
+// so they release :443 to the front-door, then starts it. On failure the flag
+// and the vhosts are rolled back so HTTPS keeps working the old way.
+func (a *App) startProxyWithVhosts() error {
+	cfg := config.Get()
+	was := cfg.ProxyEnabled
+	cfg.ProxyEnabled = true
+	config.Save()
+	a.regenerateAllVhosts()
+	if err := proxy.Start(); err != nil {
+		cfg.ProxyEnabled = was
+		config.Save()
+		a.regenerateAllVhosts()
+		return err
+	}
+	return nil
+}
+
+// projectWarning surfaces a non-fatal provisioning problem to the Projects
+// page. key is an i18n key; args fill its {0}, {1}… placeholders (frontend).
+func (a *App) projectWarning(name, key string, args ...string) {
+	if a.ctx == nil {
+		return
+	}
+	wailsRuntime.EventsEmit(a.ctx, "project:warning", map[string]interface{}{
+		"name": name,
+		"key":  key,
+		"args": args,
+	})
 }
 
 // RemoveProject removes a project
@@ -1694,6 +1831,12 @@ func (a *App) RemoveProject(name string) error {
 	for _, p := range projects {
 		if p.Name == name {
 			project.RemoveHostsEntry(p.Domain)
+			// mkcert files are per domain; nothing else references them.
+			if p.Domain != "" {
+				c, k := project.CertPaths(p.Domain)
+				os.Remove(c)
+				os.Remove(k)
+			}
 			break
 		}
 	}
@@ -1707,6 +1850,12 @@ func (a *App) RemoveProject(name string) error {
 // DetectFramework detects framework for a path
 func (a *App) DetectFramework(path string) string {
 	return project.DetectFramework(path)
+}
+
+// GetFrameworkCatalog returns every framework DevBox recognises with its
+// runtime, app-server flag and default port (drives the Projects UI).
+func (a *App) GetFrameworkCatalog() []project.Framework {
+	return project.Catalog
 }
 
 // SetProjectPort updates the dev server port for a project
@@ -1740,8 +1889,14 @@ func (a *App) SetupProjectDomain(name string) error {
 			if err := project.AddHostsEntry(p.Domain); err != nil {
 				return err
 			}
-			if ws := project.ResolveWebserver(p); ws == "" {
+			ws := project.ResolveWebserver(p)
+			if ws == "" {
 				return fmt.Errorf("no web server installed")
+			}
+			if ws == "devserver" {
+				if err := a.ensureProxy(); err != nil {
+					return fmt.Errorf("front-door proxy: %w", err)
+				}
 			}
 			if project.SyncLaravelAppURL(p) {
 				debugLog("SetupProjectDomain: APP_URL of %s synced to its domain", p.Name)
@@ -2005,6 +2160,108 @@ func (a *App) GetDevServerLogs(name string, lines int) ([]string, error) {
 	return project.GetDevServerLogs(name, lines)
 }
 
+// SetProjectAutoStart toggles keep-alive for an app-server project: its dev
+// server starts with DevBox and is restarted after an unexpected exit.
+func (a *App) SetProjectAutoStart(name string, on bool) error {
+	projects, err := project.ListProjects()
+	if err != nil {
+		return err
+	}
+	for i, p := range projects {
+		if p.Name == name {
+			projects[i].AutoStart = on
+			if err := project.SaveProjects(projects); err != nil {
+				return err
+			}
+			if on && project.IsAppServer(p.Framework) && !project.IsDevServerRunning(name) {
+				go a.StartDevServer(name)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("project not found: %s", name)
+}
+
+// autoStartDevServers starts every AUTO project's dev server at launch.
+func (a *App) autoStartDevServers() {
+	projects, err := project.ListProjects()
+	if err != nil {
+		return
+	}
+	for _, p := range projects {
+		if !p.AutoStart || !project.IsAppServer(p.Framework) || project.IsDevServerRunning(p.Name) {
+			continue
+		}
+		if err := a.StartDevServer(p.Name); err != nil {
+			debugLog("auto-start dev server %s: %v", p.Name, err)
+		}
+	}
+}
+
+// onDevServerExit is the watchdog: it tells the UI a dev server ended and,
+// for AUTO projects that crashed, brings it back — at most 3 times in 5
+// minutes so a broken build doesn't spin forever.
+func (a *App) onDevServerExit(name string, crashed bool) {
+	if a.ctx == nil {
+		return
+	}
+	logTail, _ := project.GetDevServerLogs(name, 30)
+	wailsRuntime.EventsEmit(a.ctx, "devserver:stopped", map[string]interface{}{
+		"name":    name,
+		"crashed": crashed,
+		"reason":  project.LastMeaningfulLogLine(logTail),
+	})
+	if !crashed || a.quitting {
+		return
+	}
+	projects, err := project.ListProjects()
+	if err != nil {
+		return
+	}
+	var proj *project.Project
+	for i := range projects {
+		if projects[i].Name == name {
+			proj = &projects[i]
+			break
+		}
+	}
+	if proj == nil || !proj.AutoStart {
+		return
+	}
+
+	a.restartMu.Lock()
+	if a.restartLog == nil {
+		a.restartLog = map[string][]time.Time{}
+	}
+	now := time.Now()
+	var recent []time.Time
+	for _, t := range a.restartLog[name] {
+		if now.Sub(t) < 5*time.Minute {
+			recent = append(recent, t)
+		}
+	}
+	giveUp := len(recent) >= 3
+	if !giveUp {
+		recent = append(recent, now)
+	}
+	a.restartLog[name] = recent
+	a.restartMu.Unlock()
+
+	if giveUp {
+		debugLog("watchdog: %s crashed 3 times in 5 minutes, not restarting", name)
+		wailsRuntime.EventsEmit(a.ctx, "devserver:error", map[string]interface{}{
+			"name":  name,
+			"error": "crashed repeatedly; auto-restart paused — check the dev server log",
+		})
+		return
+	}
+	debugLog("watchdog: %s exited unexpectedly, restarting (%d/3)", name, len(recent))
+	time.Sleep(2 * time.Second)
+	if err := a.StartDevServer(name); err != nil {
+		debugLog("watchdog: restart of %s failed: %v", name, err)
+	}
+}
+
 // SetProjectStartCommand sets a custom start command for a project
 func (a *App) SetProjectStartCommand(name string, cmd string) error {
 	projects, err := project.ListProjects()
@@ -2102,6 +2359,57 @@ func (a *App) OpenProjectFolder(path string) error {
 
 // --- Database Tools ---
 
+// --- Developer tools (uv, pipx, air, cargo-watch, Redis Commander…) ---
+
+// GetDevTools lists the tool catalog with install/run state.
+func (a *App) GetDevTools() []devtools.Status {
+	return devtools.List()
+}
+
+// InstallDevTool installs a catalog tool in the background.
+// Events: devtool:progress {id, message}, devtool:installed {id}, devtool:error {id, error}.
+func (a *App) InstallDevTool(id string) error {
+	go func() {
+		progress := make(chan devtools.Progress, 20)
+		done := make(chan struct{})
+		go func() {
+			for p := range progress {
+				wailsRuntime.EventsEmit(a.ctx, "devtool:progress", map[string]interface{}{"id": p.ID, "message": p.Message})
+			}
+			close(done)
+		}()
+		err := devtools.Install(id, progress)
+		close(progress)
+		<-done
+		if err != nil {
+			wailsRuntime.EventsEmit(a.ctx, "devtool:error", map[string]interface{}{"id": id, "error": err.Error()})
+			return
+		}
+		wailsRuntime.EventsEmit(a.ctx, "devtool:installed", map[string]interface{}{"id": id})
+	}()
+	return nil
+}
+
+// UninstallDevTool removes a catalog tool.
+func (a *App) UninstallDevTool(id string) error {
+	return devtools.Uninstall(id)
+}
+
+// OpenDevTool starts a web tool (if needed) and opens it in the browser.
+func (a *App) OpenDevTool(id string) error {
+	url, err := devtools.Start(id)
+	if err != nil {
+		return err
+	}
+	wailsRuntime.BrowserOpenURL(a.ctx, url)
+	return nil
+}
+
+// StopDevTool stops a running web tool.
+func (a *App) StopDevTool(id string) error {
+	return devtools.Stop(id)
+}
+
 // IsAdminerInstalled checks if Adminer is installed
 func (a *App) IsAdminerInstalled() bool {
 	return tools.IsAdminerInstalled()
@@ -2176,6 +2484,7 @@ type ProxyStatus struct {
 	Running   bool `json:"running"`
 	Enabled   bool `json:"enabled"`
 	Port      int  `json:"port"`
+	HTTPSPort int  `json:"httpsPort"`
 }
 
 // GetProxyStatus reports install/run/enabled state of the front-door proxy.
@@ -2186,6 +2495,7 @@ func (a *App) GetProxyStatus() ProxyStatus {
 		Running:   proxy.IsRunning(),
 		Enabled:   cfg.ProxyEnabled,
 		Port:      proxy.HTTPPort,
+		HTTPSPort: proxy.HTTPSPort,
 	}
 }
 
@@ -2209,13 +2519,7 @@ func (a *App) UninstallProxy() error {
 // StartProxy launches the front-door proxy. Sets ProxyEnabled so DevBox brings
 // it back automatically on next launch.
 func (a *App) StartProxy() error {
-	if err := proxy.Start(); err != nil {
-		return err
-	}
-	if cfg := config.Get(); cfg != nil {
-		cfg.ProxyEnabled = true
-	}
-	return config.Save()
+	return a.startProxyWithVhosts()
 }
 
 // StopProxy stops the proxy and clears ProxyEnabled — DevBox won't auto-start
@@ -2227,7 +2531,10 @@ func (a *App) StopProxy() error {
 	if cfg := config.Get(); cfg != nil {
 		cfg.ProxyEnabled = false
 	}
-	return config.Save()
+	err := config.Save()
+	// Web servers take :443 back for their SSL vhosts.
+	a.regenerateAllVhosts()
+	return err
 }
 
 // ReloadProxy rewrites the Caddyfile from the current project list and asks

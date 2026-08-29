@@ -1,5 +1,5 @@
 // Package proxy implements DevBox's front-door reverse proxy: a bundled Caddy
-// instance that listens on :80 (and :443 once HTTPS lands) and routes incoming
+// instance that listens on :80 and :443 and routes incoming
 // requests to per-project backends based on the Host header.
 //
 // Each registered project's domain (e.g. `myapp.test`) gets a Caddyfile block
@@ -30,7 +30,7 @@ import (
 const (
 	// HTTPPort is the loopback port the front-door proxy listens on for HTTP.
 	HTTPPort = 80
-	// HTTPSPort is reserved for the HTTPS listener wired up in phase 4.
+	// HTTPSPort is the loopback port the front-door terminates TLS on (mkcert certs).
 	HTTPSPort = 443
 	// AdminAddr is the loopback admin endpoint used for zero-downtime reloads.
 	// Not Caddy's default 2019 so a user-installed Caddy service can't collide.
@@ -128,7 +128,7 @@ func Start() error {
 	time.Sleep(500 * time.Millisecond)
 	if !IsRunning() {
 		os.Remove(pidFile())
-		return fmt.Errorf("proxy exited immediately — port %d may be in use, or DevBox needs elevated permissions to bind it (check %s)", HTTPPort, logFile())
+		return fmt.Errorf("proxy exited immediately — port %d or %d may be in use, or DevBox needs elevated permissions to bind them (check %s)", HTTPPort, HTTPSPort, logFile())
 	}
 	return nil
 }
@@ -144,9 +144,7 @@ func Stop() error {
 		os.Remove(pidFile())
 		return nil
 	}
-	if proc, err := os.FindProcess(pid); err == nil {
-		proc.Kill()
-	}
+	platform.KillProcessTree(pid)
 	os.Remove(pidFile())
 	return nil
 }

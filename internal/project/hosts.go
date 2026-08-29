@@ -16,8 +16,9 @@ func AddHostsEntry(domain string) error {
 		return fmt.Errorf("cannot read hosts file: %w", err)
 	}
 
-	// Check if already exists
-	if strings.Contains(string(data), domain) {
+	// Already mapped? Match whole host names, not substrings — otherwise
+	// "app.test" would be considered present when "my-app.test" is.
+	if hostsFileDomains()[strings.ToLower(domain)] {
 		return nil
 	}
 

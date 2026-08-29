@@ -3,85 +3,85 @@
 </p>
 <h1 align="center">DevBox</h1>
 <p align="center"><b>Your whole local development stack, one click away.</b><br>
-Runtimes · services · <code>.test</code> domains · SSL · Cloudflare tunnels — in a single desktop app.</p>
+Runtimes · databases · web servers · <code>.test</code> domains · SSL · public sharing — one desktop app, zero containers.</p>
 
 <p align="center">
   <a href="https://github.com/harungecit/DevBox/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/harungecit/DevBox?display_name=tag&color=08a6d0"></a>
-  <a href="https://github.com/harungecit/DevBox/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/harungecit/DevBox/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Platform" src="https://img.shields.io/badge/Windows-10%2F11%20x64-0078d4">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-coming%20soon-lightgrey">
 </p>
 
 <p align="center">
+  <a href="https://github.com/harungecit/DevBox/releases/latest"><b>⬇ Download</b></a> ·
   <a href="https://devbox.harungecit.dev/">Website</a> ·
-  <a href="https://github.com/harungecit/DevBox/releases/latest">Download</a> ·
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#features">Features</a> ·
-  <a href="#building-from-source">Build from source</a> ·
-  <a href="https://devbox.harungecit.dev/privacy.html">Privacy</a>
+  <a href="#getting-started">Getting started</a> ·
+  <a href="#what-you-get">What you get</a> ·
+  <a href="#faq">FAQ</a>
 </p>
 
 ---
 
-DevBox is a free, open-source (MIT) desktop application for developers who would rather ship than configure. It downloads official builds of **Go, Node.js, PHP, Python and Rust**, installs and supervises **Nginx, Apache, Caddy, FrankenPHP, PostgreSQL, MySQL, MariaDB, MongoDB, Redis and Mailpit**, gives every project a **`myapp.test` domain with a trusted local certificate**, and can **share any project to the internet through Cloudflare** — on your own domain if you like. No Docker, no PATH surgery, no telemetry. Everything lives in one folder: `C:\DevBox`.
+## What is DevBox?
 
-## Why DevBox?
+DevBox is a free, open-source desktop app that sets up and runs a complete local development environment for you. Instead of installing PHP here, Node there, fighting with PATH, editing the hosts file, and generating certificates by hand, you open DevBox and click **Install**.
 
-| Pain | DevBox |
-|---|---|
-| “Which PHP/Node version is this project on?” | Any number of versions side by side; one global, others pinned per project. Each PHP version gets its own FastCGI instance automatically. |
-| A new patch release means a fresh install and lost config | Minor/patch releases **update in place** — php.ini, Composer, yarn/pnpm, global npm & pip packages carried over. |
-| Ports, vhosts, hosts-file edits | A built-in front-door proxy routes `*.test` to the right backend (nginx, FrankenPHP or your dev server). Hosts entries are written for you (one UAC prompt). |
-| “It works on my machine” demos | One click → public URL via Cloudflare. Link your account → `app.yourdomain.com` with DNS handled. |
-| Hunting for extensions and tools | Dev-tuned php.ini with common extensions on, PECL extensions (Xdebug, Redis, Imagick, MongoDB…) one click away, Composer, npm/yarn/pnpm/Bun, Adminer, mkcert, cloudflared. |
-| Background daemons and hidden folders | Runs in the tray, keeps services up until you quit, and stores everything in `C:\DevBox`. |
+Everything DevBox installs is the **real, native software** — official builds of the runtimes and services, running directly on your machine as normal processes. There is no Docker, no virtual machine, no wrapper layer. Your projects run exactly as they would in production, only faster to set up.
 
-## Features
+- **Runtimes:** Go · Node.js · PHP · Python · Rust — any version, several side by side
+- **Web servers:** Nginx · Apache · Caddy · FrankenPHP
+- **Databases & caches:** PostgreSQL · MySQL · MariaDB · MongoDB · Redis · Valkey
+- **Tools:** Mailpit (catch outgoing mail), Adminer, Redis Commander and mongo-express (database UIs), Composer, npm/yarn/pnpm/Bun, uv/pipx/Poetry, air/golangci-lint/gopls, cargo-watch/cargo-edit/cargo-audit, mkcert, cloudflared
+- **Projects:** `myapp.test` domains with trusted HTTPS, framework detection, one-click public URLs
 
-**Runtimes** — Go · Node.js · PHP · Python · Rust
-- Install any version from the official sources (checksums verified). Version lists are cached and refreshed in the background.
-- Global version = on your PATH, powers FastCGI, used by unpinned projects. Pin a different version per project.
-- In-place updates within a release line with settings migration; installed-count badges; one-click npm self-update.
+Everything lives in a single folder (`C:\DevBox`), and DevBox sends no telemetry.
 
-**Services** — Nginx · Apache · Caddy · FrankenPHP · PostgreSQL · MySQL · MariaDB · MongoDB · Redis · Mailpit
-- Pick a version and a port (conflicts detected before install), start/stop/restart, auto-start with DevBox, logs and connection details in the UI.
-- In-place updates that keep your data, configuration and vhosts. Major upgrades of databases are flagged, not forced.
+## Getting started
 
-**Projects**
-- Add a folder, scaffold from a template (Laravel, Symfony, WordPress, Next.js, Nuxt, Vue, React, Svelte, Angular, Go, Rust, Django, static) or clone a Git repo.
-- Framework detection, `.test` domain, SSL via mkcert, per-project runtime/version/web-server choice, dev-server start/stop with logs.
-- Share: quick Cloudflare tunnel or a custom hostname on your own zone.
+1. **Download** the installer from the [latest release](https://github.com/harungecit/DevBox/releases/latest) — `DevBox-Setup-<version>-windows-amd64.exe` — and run it.
+   Windows SmartScreen may warn on first launch because the app is new; choose **More info → Run anyway**.
+2. **Runtimes** → pick PHP, Node.js, Go, Python or Rust and click **Install**. The first version you install becomes the global one (it's put on your PATH automatically).
+3. **Services** → install a web server (Nginx is a good default) and the database you need, then hit **Start**. Switch on **AUTO** to have them start together with DevBox.
+4. **Projects** → **Add**: point to an existing folder, scaffold a new app from a template, or clone a Git repo. DevBox detects the framework, registers `your-project.test`, and issues a trusted certificate.
+5. Open `https://your-project.test` in the browser. Done.
 
-**Quality of life**
-- English & Turkish UI, light/dark/system theme, start at login (minimized), close to tray, in-app update check via GitHub Releases.
+Need a public link for a client or a webhook? Click the **share** icon on a project — you get a `*.trycloudflare.com` URL in seconds. Link your Cloudflare account in **Settings** to use your own domain instead.
 
-## Quick start
+Full walkthrough with screenshots: <https://devbox.harungecit.dev/#usage>
 
-1. Download **`DevBox-Setup-<version>-windows-amd64.exe`** from the [latest release](https://github.com/harungecit/DevBox/releases/latest) and run it.
-   If Windows SmartScreen appears, choose **More info → Run anyway** (see [Security & signing](#security--signing)).
-2. **Runtimes** → install PHP 8.4 (or Node, Go, …). The first version becomes global.
-3. **Services** → install Nginx and PostgreSQL/MySQL; switch on **AUTO** so they start with DevBox.
-4. **Overview** → Front-door → Install → Start (binds port 80 so URLs need no port).
-5. **Projects** → Add → pick a folder or template → click the globe icon to register `myapp.test`, flip **SSL** → open in the browser.
-6. Click the share icon to get a public URL. For your own domain: **Settings → Cloudflare**.
+## What you get
 
-Full guide: <https://devbox.harungecit.dev/#usage>
+### Runtimes — Go, Node.js, PHP, Python, Rust
+- Install any version straight from the official sources (checksums verified). Version lists are cached and refreshed quietly in the background.
+- Keep as many versions as you like. One is **global** (on your PATH); any project can be **pinned** to another one.
+- Each PHP version gets its own FastCGI process, so a Laravel app on PHP 8.4 and a legacy app on 7.4 can run at the same time.
+- **Batteries included:** PHP ships with a dev-tuned `php.ini` and common extensions enabled; Xdebug, Redis, Imagick, MongoDB and other PECL extensions are one click away. Composer, Bun, yarn and pnpm are installed for you.
+- Minor/patch releases **update in place** — your `php.ini`, Composer, global npm and pip packages carry over.
 
-## Platform support
+### Services — Nginx, Apache, Caddy, FrankenPHP, PostgreSQL, MySQL, MariaDB, MongoDB, Redis, Valkey, Mailpit
+- Choose a version and a port (conflicts are caught before install), then start, stop, restart, view logs and copy connection details — all from the UI.
+- Services keep running from the system tray until you quit DevBox; **AUTO** starts them at login.
+- In-place updates keep your data, configs and vhosts. Major database upgrades are flagged, never forced.
+- Mailpit catches every e-mail your app sends and shows it in a web inbox — no more accidental mails to real users.
 
-| Platform | Status |
-|---|---|
-| Windows 10 / 11 (x64) | ✅ Supported — installer and portable zip on every release |
-| macOS (Apple Silicon / Intel) | 🚧 Coming soon — the code base compiles for macOS, but macOS download sources for several runtimes/services still need validation; it will ship as a separate release once it passes the same tests as Windows |
-| Linux | Not planned for now |
+### Projects
+- **Import** any folder, **scaffold** from a template (Laravel, Symfony, WordPress, CodeIgniter, Slim, CakePHP, Yii, Next.js, Nuxt, NestJS, Astro, SvelteKit, Vue, React, Svelte, Angular, Express, Django, Flask, FastAPI, Go, Gin, Rust, static…), or **clone** a repository.
+- Framework auto-detection for 40+ frameworks — Laravel, Lumen, Symfony, CodeIgniter, Yii, CakePHP, Slim, Laminas, Drupal, WordPress, Joomla, Magento, PrestaShop, Next.js, Nuxt, NestJS, Astro, Remix, SvelteKit, Angular, Gatsby, Vue, React, Svelte, AdonisJS, Express, Fastify, Koa, Hono, Django, Flask, FastAPI, Goravel, Gin, Fiber, Echo, Actix, Axum, Rocket… — including each one's document root and dev-server command.
+- Every project gets a **`.test` domain** (hosts file handled for you), a **trusted local certificate** via mkcert, and the right vhost for your chosen web server — nginx, Apache, Caddy or FrankenPHP.
+- App-server frameworks (Next.js, Nuxt, Vite, Django, Go…) get a start/stop button with live logs, and the built-in front-door proxy routes their `.test` domain to the dev server.
+- Pick the runtime version and web server per project; the PHP FastCGI instance and vhost are wired up automatically.
+- **Terminal, ready to go:** one click opens your own terminal (Windows Terminal, PowerShell, Git Bash, iTerm…) in the project folder with the project's runtime version on PATH — or straight into `psql` / `mysql` / `redis-cli` connected to the DevBox service.
 
-## Security & signing
+### Share to the internet
+- **Quick tunnel:** one click, instant `https://*.trycloudflare.com` URL. Great for demos, mobile testing and webhooks.
+- **Your own domain:** connect a Cloudflare API token once, then any project can be published as `app.yourdomain.com` — DNS record and tunnel route are created for you and restored on the next launch.
+- Domain-bound settings (`APP_URL`, `NEXTAUTH_URL`, …) are served to your app per request, so local and public URLs work side by side.
 
-- Every release is built by the public [`release.yml`](.github/workflows/release.yml) workflow from the tagged source, after `go vet`, unit tests and `svelte-check` pass. `SHA256SUMS-windows.txt` is attached to each release.
-- DevBox is not yet signed with a paid Authenticode certificate, so SmartScreen may show *“Windows protected your PC”* on first run (More info → Run anyway). The workflow already supports signing two ways — a `.pfx` certificate (`WINDOWS_CERT_PFX_BASE64` + `WINDOWS_CERT_PASSWORD`) or [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) (`AZURE_*` + `TRUSTED_SIGNING_*` secrets) — add the secrets and every build is signed automatically. SmartScreen reputation then accrues as people install the signed binary. Open-source projects can also apply for free signing at [SignPath Foundation](https://signpath.org/).
-- Elevation is requested only for the hosts file and (first start) for the front-door proxy binding port 80; both show a UAC prompt.
-- DevBox sends no telemetry. See the [privacy policy](https://devbox.harungecit.dev/privacy.html) for the full list of network connections.
+### Quality of life
+- English and Turkish UI, light/dark/system theme.
+- Runs in the tray, starts at login (optionally minimized), closes to tray.
+- In-app update check — new DevBox versions install from **Settings** in one click.
+- Elevation (UAC) is asked only when strictly needed: writing the hosts file and binding port 80.
 
 ## Where things live
 
@@ -91,52 +91,38 @@ C:\DevBox\
 ├─ services\{nginx,postgres,mysql,...}\        # binaries, data, logs, generated configs
 ├─ projects\                                   # default home for scaffolded / cloned projects
 ├─ tools\{bun,mkcert,cloudflared,...}\
-├─ cache\                                      # remote version lists
 ├─ ssl\certs\                                  # mkcert certificates
-├─ logs\                                       # debug.log, migration.log, per-service logs
-├─ config.json · projects.json · tunnel-routes.json
-```
-Uninstalling DevBox leaves this folder untouched.
-
-## Building from source
-
-Requirements: Go 1.24+, Node.js 20+, [Wails CLI v2.11](https://wails.io/docs/gettingstarted/installation) (`go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0`), and NSIS for the installer (`choco install nsis`).
-
-```bash
-git clone https://github.com/harungecit/DevBox.git
-cd DevBox
-wails dev                 # hot-reloading dev build
-wails build               # build/bin/DevBox.exe
-wails build -nsis         # + build/bin/DevBox-amd64-installer.exe
+├─ logs\
+└─ config.json · projects.json
 ```
 
-Useful checks (what CI runs):
+Uninstalling DevBox leaves this folder — and your data — untouched.
 
-```bash
-go vet ./... && go test ./...
-GOOS=darwin go build ./...            # cross-compile check
-cd frontend && npm ci && npm run check && npm run build
-```
+## Platform support
 
-Architecture notes for contributors are in [`CLAUDE.md`](CLAUDE.md): Wails v2 (Go backend + Svelte/TypeScript frontend), a `platform` abstraction layer for OS specifics, plugin-style runtime/service managers, and event-driven async installs.
+| Platform | Status |
+|---|---|
+| Windows 10 / 11 (x64) | ✅ Supported — installer and portable zip on every release |
+| macOS (Apple Silicon / Intel) | 🚧 Coming soon |
+| Linux | Not planned for now |
 
-## Releasing
+## FAQ
 
-Tag and push — CI does the rest:
+**Is this Docker under the hood?** No. DevBox downloads the official binaries and runs them as native processes. Nothing is virtualised, and you can use the same binaries from your own terminal.
 
-```bash
-git tag v0.3.0 && git push origin v0.3.0
-```
+**Will it mess with my existing PHP/Node install?** DevBox only adds its own entries to your user PATH and keeps everything under `C:\DevBox`. Remove the entries or the folder and your system is as it was.
 
-The **Release** workflow runs the test suite, builds the Windows installer and portable zip (signing them if the secrets exist), generates release notes and publishes the GitHub Release. Running DevBox instances notice the new version within seconds of their next launch and can install it from **Settings → Application updates**.
+**Why does SmartScreen warn me?** DevBox is not yet signed with a paid code-signing certificate. Every release is built publicly by GitHub Actions from the tagged source and ships with a `SHA256SUMS` file you can verify.
+
+**Does it phone home?** No telemetry. The only network requests are the downloads you trigger and the update/version checks — see the [privacy policy](https://devbox.harungecit.dev/privacy.html).
 
 ## Contributing
 
-Issues and pull requests are welcome. Please open an issue first for larger changes so we can agree on the approach. By contributing you agree that your contributions are licensed under the MIT License.
+Bug reports, feature ideas and pull requests are welcome — open an [issue](https://github.com/harungecit/DevBox/issues) to get started. Developer notes live in [`CLAUDE.md`](CLAUDE.md).
 
 ## Acknowledgements
 
-DevBox stands on the shoulders of [Wails](https://wails.io), [Svelte](https://svelte.dev), [Caddy](https://caddyserver.com), [mkcert](https://github.com/FiloSottile/mkcert), [cloudflared](https://github.com/cloudflare/cloudflared), [Mailpit](https://mailpit.axllent.org), [Adminer](https://www.adminer.org), [FrankenPHP](https://frankenphp.dev), the PHP for Windows team, and every runtime and database project it installs. Thank you.
+DevBox stands on the shoulders of great open-source projects: [Wails](https://wails.io), [Svelte](https://svelte.dev), [Caddy](https://caddyserver.com), [FrankenPHP](https://frankenphp.dev), [mkcert](https://github.com/FiloSottile/mkcert), [cloudflared](https://github.com/cloudflare/cloudflared), [Mailpit](https://mailpit.axllent.org), [Adminer](https://www.adminer.org), the PHP for Windows team, and every runtime, web server and database it installs for you. Thank you.
 
 ## License
 

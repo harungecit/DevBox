@@ -4,6 +4,7 @@
     GetServiceDetails,
     OpenFileInEditor,
     OpenInBrowser,
+    SetServiceSetting,
   } from '../../../wailsjs/go/main/App';
 
   export let serviceName: string = '';
@@ -17,6 +18,7 @@
   interface ConnectionEntry {
     label: string;
     value: string;
+    key?: string; // editable setting: port | user | password | databases
   }
 
   interface WebLinkEntry {
@@ -55,6 +57,35 @@
     }
   }
 
+  // Inline editing of connection settings (port, user, password, databases)
+  let editingKey = '';
+  let editValue = '';
+  let saving = false;
+  let editError = '';
+
+  function startEdit(entry: ConnectionEntry) {
+    editingKey = entry.key || '';
+    editValue = entry.value === '(none)' ? '' : (entry.key === 'databases' ? entry.value.split(' ')[0] : entry.value);
+    editError = '';
+  }
+  function cancelEdit() { editingKey = ''; editError = ''; }
+  async function saveEdit() {
+    if (!editingKey) return;
+    saving = true; editError = '';
+    try {
+      await SetServiceSetting(serviceName, editingKey, editValue);
+      editingKey = '';
+      await loadDetails();
+    } catch (e: any) {
+      editError = typeof e === 'string' ? e : e?.message || String(e);
+    }
+    saving = false;
+  }
+  function editKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') saveEdit();
+    else if (e.key === 'Escape') cancelEdit();
+  }
+
   async function openEditor(path: string) {
     try {
       await OpenFileInEditor(path);
@@ -91,10 +122,37 @@
           <div class="bg-[var(--color-bg)] rounded-lg border border-[var(--color-border)] divide-y divide-[var(--color-border)]">
             {#each details.connectionInfo as entry}
               <div class="flex items-center justify-between px-3 py-2 group">
-                <div class="flex items-center gap-3 min-w-0">
+                <div class="flex items-center gap-3 min-w-0 flex-1">
                   <span class="text-xs text-[var(--color-text-secondary)] font-medium w-24 flex-shrink-0">{entry.label}</span>
-                  <span class="text-xs font-mono font-bold text-[var(--color-text)] truncate">{entry.value}</span>
+                  {#if entry.key && editingKey === entry.key}
+                    <input
+                      class="text-xs font-mono font-bold px-2 py-0.5 rounded border border-primary-500/40 bg-[var(--color-card)] focus:outline-none focus:ring-2 focus:ring-primary-500/40 w-56"
+                      type="text"
+                      inputmode={entry.key === 'port' || entry.key === 'databases' ? 'numeric' : 'text'}
+                      bind:value={editValue}
+                      on:keydown={editKeydown}
+                      disabled={saving}
+                      autofocus
+                    />
+                    <button class="text-[10px] bg-primary-500 text-white px-2 py-0.5 rounded font-bold hover:bg-primary-600 disabled:opacity-50" on:click={saveEdit} disabled={saving}>
+                      {#if saving}<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block"></div>{:else}{$t('services.save')}{/if}
+                    </button>
+                    <button class="text-[10px] text-slate-400 hover:text-red-500 px-1" on:click={cancelEdit} disabled={saving}>✕</button>
+                    {#if editError}<span class="text-[11px] text-red-500 truncate" title={editError}>{editError}</span>{/if}
+                  {:else}
+                    <span class="text-xs font-mono font-bold text-[var(--color-text)] truncate">{entry.value}</span>
+                  {/if}
                 </div>
+                {#if entry.key && editingKey !== entry.key}
+                  <button
+                    class="text-xs px-2 py-0.5 rounded flex-shrink-0 ml-2 text-[var(--color-text-secondary)] hover:text-primary-500 hover:bg-primary-500/5 border border-transparent"
+                    on:click={() => startEdit(entry)}
+                    title={$t('services.editValue')}
+                  >
+                    <svg class="w-3 h-3 inline-block mr-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                    {$t('services.editValue')}
+                  </button>
+                {/if}
                 <button
                   class="text-xs px-2 py-0.5 rounded transition-all flex-shrink-0 ml-2 {copiedField === entry.label ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'text-[var(--color-text-secondary)] hover:text-primary-500 hover:bg-primary-500/5 border border-transparent'}"
                   on:click={() => copyValue(entry.value, entry.label)}

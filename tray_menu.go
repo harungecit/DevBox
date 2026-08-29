@@ -43,6 +43,17 @@ func (a *App) buildTrayMenu() {
 
 	systray.AddSeparator()
 
+	term := systray.AddMenuItem(t("tray.terminal"), "")
+	term.Click(func() {
+		go func() {
+			if err := a.OpenTerminal(); err != nil {
+				debugLog("tray terminal: %v", err)
+			}
+		}()
+	})
+
+	systray.AddSeparator()
+
 	quit := systray.AddMenuItem(t("tray.quit"), "")
 	quit.Click(func() { a.quit() })
 }

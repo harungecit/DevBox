@@ -7,6 +7,9 @@ type Platform interface {
 	// Process management
 	SetProcessAttrs(cmd *exec.Cmd, createGroup bool, hide bool)
 	IsProcessRunning(pid int) bool
+	// KillProcessTree ends a process and every descendant it spawned (cmd/npx
+	// shims, nginx/apache workers) so a Stop never leaves an orphan behind.
+	KillProcessTree(pid int) error
 
 	// PATH management
 	GetUserPATH() ([]string, error)
@@ -51,6 +54,7 @@ func ScriptName(b string) string                      { return current.ScriptNam
 func LibExt() string                                  { return current.LibExt() }
 func SetProcessAttrs(cmd *exec.Cmd, group, hide bool) { current.SetProcessAttrs(cmd, group, hide) }
 func IsProcessRunning(pid int) bool                   { return current.IsProcessRunning(pid) }
+func KillProcessTree(pid int) error                   { return current.KillProcessTree(pid) }
 func OpenFolder(p string) error                       { return current.OpenFolder(p) }
 func OpenFile(p string) error                         { return current.OpenFile(p) }
 func WriteHostsFileElevated(content []byte) error     { return current.WriteHostsFileElevated(content) }

@@ -165,6 +165,18 @@ func (d *darwinPlatform) SetProcessAttrs(cmd *exec.Cmd, createGroup bool, hide b
 	// hide is a no-op on macOS (no console windows)
 }
 
+// KillProcessTree kills the process group DevBox children are started in
+// (SetProcessAttrs uses Setpgid), falling back to the single PID.
+func (d *darwinPlatform) KillProcessTree(pid int) error {
+	if err := syscall.Kill(-pid, syscall.SIGKILL); err == nil {
+		return nil
+	}
+	if p, err := os.FindProcess(pid); err == nil {
+		return p.Kill()
+	}
+	return nil
+}
+
 func (d *darwinPlatform) IsProcessRunning(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil

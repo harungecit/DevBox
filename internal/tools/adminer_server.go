@@ -108,9 +108,7 @@ func StopAdminerServer() error {
 		os.Remove(adminerPidPath())
 		return nil
 	}
-	if proc, err := os.FindProcess(pid); err == nil {
-		proc.Kill()
-	}
+	platform.KillProcessTree(pid)
 	os.Remove(adminerPidPath())
 	return nil
 }

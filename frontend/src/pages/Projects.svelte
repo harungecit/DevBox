@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import ConfirmDialog from '../lib/components/ConfirmDialog.svelte';
   import { t } from '../lib/i18n/index';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import ProgressBar from '../lib/components/ProgressBar.svelte';
@@ -26,6 +27,9 @@
     GetRunningDevServers,
     GetDevServerLogs,
     SetProjectStartCommand,
+    SetProjectAutoStart,
+    GetFrameworkCatalog,
+    OpenProjectTerminal,
     SetProjectRuntime,
     SetProjectRuntimeVersion,
     SetProjectWebserver,
@@ -56,6 +60,7 @@
     webserver?: string;      // auto / nginx / caddy / apache / frankenphp / devserver
     publicHostname?: string; // custom-domain tunnel hostname (needs linked Cloudflare)
     hostsRegistered?: boolean; // domain actually mapped in the hosts file
+    autoStart?: boolean;       // keep the dev server running (start with DevBox, restart on crash)
   }
 
   interface TemplateInfo {
@@ -69,6 +74,49 @@
   }
 
   const appServerFrameworks = ['Next.js', 'Nuxt', 'Vue', 'React', 'Svelte', 'Angular', 'Go', 'Rust', 'Django', 'Python'];
+
+  // Detected frameworks imply their runtime; offering PHP for a Next.js app only
+  // produces broken configs. Mirrors project.RuntimeFromFramework on the Go side.
+  const frameworkRuntime: Record<string, string> = {
+    'Laravel': 'php', 'WordPress': 'php', 'Symfony': 'php', 'CodeIgniter': 'php', 'Yii': 'php', 'CakePHP': 'php', 'Drupal': 'php', 'PHP': 'php',
+    'Next.js': 'node', 'Nuxt': 'node', 'Vue': 'node', 'React': 'node', 'Svelte': 'node', 'Angular': 'node',
+    'Django': 'python', 'Python': 'python', 'Go': 'go', 'Rust': 'rust', 'Static': 'static',
+  };
+  // Live catalog from the backend (project.Catalog); the static maps above are
+  // only the fallback until it arrives.
+  let catalog: Record<string, { runtime: string; appServer: boolean; port: number }> = {};
+  async function loadCatalog() {
+    try {
+      const list = await GetFrameworkCatalog();
+      const next: typeof catalog = {};
+      for (const f of list || []) next[f.name] = { runtime: f.runtime, appServer: f.appServer, port: f.port };
+      catalog = next;
+      projects = projects; // re-evaluate isAppServer()/lockedRuntime() in the list
+    } catch (e) {
+      console.error('framework catalog:', e);
+    }
+  }
+  function lockedRuntime(framework: string): string {
+    return catalog[framework]?.runtime ?? frameworkRuntime[framework] ?? '';
+  }
+  function runtimeChoicesFor(framework: string): { id: string; label: string }[] {
+    const rt = lockedRuntime(framework);
+    if (rt) return runtimeChoices.filter((c) => c.id === rt);
+    return runtimeChoices;
+  }
+
+  async function toggleAutoStart(proj: ProjectInfo, on: boolean) {
+    savingProjectSettings[proj.name] = true;
+    savingProjectSettings = savingProjectSettings;
+    try {
+      await SetProjectAutoStart(proj.name, on);
+      await loadProjects();
+    } catch (e: any) {
+      errorMessage = `${proj.name}: ${e?.message || e}`;
+    }
+    savingProjectSettings[proj.name] = false;
+    savingProjectSettings = savingProjectSettings;
+  }
 
   interface TunnelState {
     running: boolean;
@@ -461,7 +509,8 @@
       if (!folder) return;
 
       newPath = folder;
-      newDomain = folder.split(/[\\/]/).pop()?.toLowerCase().replace(/[^a-z0-9-]/g, '-') + '.test' || 'project.test';
+      const base = folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'project';
+      newDomain = (base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'project') + '.test';
       detectedFramework = await DetectFramework(folder);
       // Set default port for app-server frameworks
       const defaultPorts: Record<string, number> = {
@@ -497,6 +546,16 @@
       errorMessage = String(e);
     }
     adding = false;
+  }
+
+  // Removal asks first (ConfirmDialog at the bottom of the page).
+  let pendingRemove: string | null = null;
+  function askRemoveProject(name: string) { pendingRemove = name; }
+  async function confirmRemoveProject() {
+    const name = pendingRemove;
+    if (!name) return;
+    await removeProject(name);
+    pendingRemove = null;
   }
 
   async function removeProject(name: string) {
@@ -550,21 +609,37 @@
       if (path) {
         await OpenFileInEditor(path);
       } else {
-        errorMessage = 'No web server installed';
+        errorMessage = $t('projects.noVhostFile');
       }
     } catch (e) {
       errorMessage = String(e);
     }
   }
 
+  async function openTerminal(name: string) {
+    errorMessage = '';
+    try { await OpenProjectTerminal(name); } catch (e: any) { errorMessage = `${name}: ${e?.message || e}`; }
+  }
+
   function openFolder(path: string) {
     OpenProjectFolder(path);
   }
 
-  function openBrowser(project: ProjectInfo) {
+  async function openBrowser(project: ProjectInfo) {
     const devPort = devServerStates[project.name]?.port || project.port;
-    if (isAppServer(project.framework) && devPort > 0) {
-      OpenInBrowser(`http://localhost:${devPort}`);
+    if (isAppServer(project.framework)) {
+      // App-server projects are reachable on their .test domain only through
+      // the front-door proxy (which forwards to the dev-server port). Prefer the
+      // domain when that path is available; otherwise fall back to localhost.
+      let proxyUp = false;
+      if (project.domain && project.hostsRegistered) {
+        try { proxyUp = (await GetProxyStatus())?.running === true; } catch { proxyUp = false; }
+      }
+      if (proxyUp) {
+        OpenInBrowser(`${project.ssl ? 'https' : 'http'}://${project.domain}`);
+      } else if (devPort > 0) {
+        OpenInBrowser(`http://localhost:${devPort}`);
+      }
     } else if (project.ssl) {
       OpenInBrowser(`https://${project.domain}`);
     } else {
@@ -590,6 +665,8 @@
   }
 
   function isAppServer(fw: string): boolean {
+    const entry = catalog[fw];
+    if (entry) return entry.appServer;
     return appServerFrameworks.includes(fw);
   }
 
@@ -734,6 +811,33 @@
       'CakePHP': 'bg-red-500/10 text-red-600 border-red-500/20',
       'Drupal': 'bg-sky-600/10 text-sky-600 border-sky-600/20',
       'PHP': 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20',
+      'Lumen': 'bg-red-500/10 text-red-500 border-red-500/20',
+      'Slim': 'bg-lime-500/10 text-lime-600 border-lime-500/20',
+      'Laminas': 'bg-sky-500/10 text-sky-600 border-sky-500/20',
+      'Joomla': 'bg-blue-500/10 text-blue-600 border-blue-500/20',
+      'Magento': 'bg-orange-500/10 text-orange-600 border-orange-500/20',
+      'PrestaShop': 'bg-pink-500/10 text-pink-600 border-pink-500/20',
+      'NestJS': 'bg-rose-500/10 text-rose-500 border-rose-500/20',
+      'Astro': 'bg-violet-500/10 text-violet-500 border-violet-500/20',
+      'Remix': 'bg-slate-500/10 text-slate-400 border-slate-500/20',
+      'SvelteKit': 'bg-orange-500/10 text-orange-500 border-orange-500/20',
+      'Gatsby': 'bg-purple-500/10 text-purple-500 border-purple-500/20',
+      'AdonisJS': 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20',
+      'Express': 'bg-slate-500/10 text-slate-400 border-slate-500/20',
+      'Fastify': 'bg-slate-500/10 text-slate-400 border-slate-500/20',
+      'Koa': 'bg-slate-500/10 text-slate-400 border-slate-500/20',
+      'Hono': 'bg-orange-500/10 text-orange-500 border-orange-500/20',
+      'Vite': 'bg-violet-500/10 text-violet-500 border-violet-500/20',
+      'Node': 'bg-green-600/10 text-green-600 border-green-600/20',
+      'FastAPI': 'bg-teal-500/10 text-teal-600 border-teal-500/20',
+      'Flask': 'bg-slate-500/10 text-slate-400 border-slate-500/20',
+      'Goravel': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
+      'Gin': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
+      'Fiber': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
+      'Echo': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
+      'Actix': 'bg-orange-600/10 text-orange-600 border-orange-600/20',
+      'Axum': 'bg-orange-600/10 text-orange-600 border-orange-600/20',
+      'Rocket': 'bg-orange-600/10 text-orange-600 border-orange-600/20',
       'Static': 'bg-gray-500/10 text-gray-500 border-gray-500/20',
     };
     return map[fw] || 'bg-slate-500/10 text-slate-400 border-slate-500/20';
@@ -752,6 +856,7 @@
   }
 
   onMount(async () => {
+    loadCatalog();
     loadProjects();
     loadInstalledWebservers();
     loadTunnelStatus();
@@ -768,9 +873,17 @@
       devServerStates = { ...devServerStates };
       loadProjects();
     }));
+    eventCleanups.push(EventsOn('project:warning', (data: any) => {
+      errorMessage = $t(data.key, ...(data.args || []));
+      loadProjects();
+    }));
     eventCleanups.push(EventsOn('devserver:stopped', (data: any) => {
       delete devServerStates[data.name];
       devServerStates = { ...devServerStates };
+      if (data.crashed) {
+        const reason = typeof data.reason === 'string' ? data.reason.trim() : '';
+        errorMessage = $t('projects.serverCrashed', data.name) + (reason ? ` ${reason}` : '');
+      }
     }));
     eventCleanups.push(EventsOn('devserver:error', (data: any) => {
       if (data.name) {
@@ -1241,28 +1354,28 @@
                     <span class="text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase {frameworkColor(proj.framework)}">{proj.framework}</span>
                   {/if}
                 </div>
-                <div class="flex items-center gap-3 mt-1">
-                  <span class="text-xs text-[var(--color-text-secondary)] font-mono truncate">{proj.path}</span>
+                <div class="flex items-center gap-3 mt-1 min-w-0">
+                  <span class="text-xs text-[var(--color-text-secondary)] font-mono truncate min-w-0 flex-shrink" title={proj.path}>{proj.path}</span>
                   {#if proj.domain}
                     {#if proj.hostsRegistered}
-                      <span class="text-xs font-mono text-primary-500 font-bold">{proj.domain}</span>
+                      <button class="text-xs font-mono text-primary-500 font-bold hover:underline whitespace-nowrap flex-shrink-0" on:click={() => openBrowser(proj)} title={$t('projects.openInBrowser')}>{proj.domain}</button>
                     {:else}
-                      <button class="text-xs font-mono text-red-500 font-bold hover:underline flex items-center gap-1" on:click={() => setupDomain(proj.name)} title={$t('projects.domainNotRegistered')}>
+                      <button class="text-xs font-mono text-red-500 font-bold hover:underline flex items-center gap-1 whitespace-nowrap flex-shrink-0" on:click={() => setupDomain(proj.name)} title={$t('projects.domainNotRegistered')}>
                         <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                         {proj.domain}
                       </button>
                     {/if}
                   {/if}
                   {#if isAppServer(proj.framework) && proj.port > 0}
-                    <span class="text-[10px] font-mono text-amber-500 font-bold">:{proj.port}</span>
+                    <span class="text-[10px] font-mono text-amber-500 font-bold whitespace-nowrap flex-shrink-0">:{proj.port}</span>
                   {/if}
                   {#if isDevRunning}
-                    <span class="flex items-center gap-1">
+                    <span class="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
                       <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                       <span class="text-[10px] font-bold text-emerald-500">{$t('projects.serverRunning')}{ds?.port ? ` :${ds.port}` : ''}</span>
                     </span>
                   {:else if isDevStarting}
-                    <span class="flex items-center gap-1">
+                    <span class="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
                       <div class="w-2.5 h-2.5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
                       <span class="text-[10px] font-bold text-amber-500">{$t('projects.serverStarting')}</span>
                     </span>
@@ -1336,6 +1449,15 @@
                   </button>
                 {/if}
 
+                <!-- Terminal here -->
+                <button
+                  class="btn-icon bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
+                  on:click={() => openTerminal(proj.name)}
+                  title={$t('projects.openTerminal')}
+                >
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                </button>
+
                 <!-- Open Folder -->
                 <button
                   class="btn-icon bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
@@ -1354,8 +1476,8 @@
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                 </button>
 
-                <!-- Edit Config -->
-                {#if proj.domain}
+                <!-- Edit Config (web-server vhost; dev-server projects have none) -->
+                {#if proj.domain && !isAppServer(proj.framework)}
                   <button
                     class="btn-icon bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
                     on:click={() => openVhostConfig(proj.name)}
@@ -1408,7 +1530,7 @@
                 <!-- Remove -->
                 <button
                   class="btn-icon text-red-500 hover:bg-red-500/10"
-                  on:click={() => removeProject(proj.name)}
+                  on:click={() => askRemoveProject(proj.name)}
                   title={$t('projects.remove')}
                 >
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -1470,15 +1592,27 @@
             {@const currentRuntime = proj.runtime || ''}
             {@const currentVersion = proj.runtimeVersion || ''}
             {@const currentWebserver = proj.webserver || ''}
-            <div class="mt-3 pt-3 border-t border-[var(--color-border)] grid grid-cols-4 gap-3">
+            <div class="mt-3 pt-3 border-t border-[var(--color-border)] grid gap-3 {isAppServer(proj.framework) ? 'grid-cols-5' : 'grid-cols-4'}">
+              {#if isAppServer(proj.framework)}
+                <div>
+                  <label class="block text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-1.5">{$t('projects.autoStart')}</label>
+                  <button
+                    class="w-full px-2 py-1.5 text-xs rounded-lg border font-semibold transition-colors {proj.autoStart ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30' : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)]'}"
+                    on:click={() => toggleAutoStart(proj, !proj.autoStart)}
+                    disabled={savingProjectSettings[proj.name]}
+                    title={$t('projects.autoStartHint')}
+                  >{proj.autoStart ? $t('projects.autoStartOn') : $t('projects.autoStartOff')}</button>
+                </div>
+              {/if}
               <div>
                 <label class="block text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-1.5">{$t('projects.runtime')}</label>
                 <select
                   class="w-full px-2 py-1.5 text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]"
                   on:change={(e) => changeRuntime(proj, selectValue(e))}
-                  disabled={savingProjectSettings[proj.name]}
+                  disabled={savingProjectSettings[proj.name] || !!lockedRuntime(proj.framework)}
+                  title={lockedRuntime(proj.framework) ? $t('projects.runtimeLocked', proj.framework) : ''}
                 >
-                  {#each runtimeChoices as rc}
+                  {#each runtimeChoicesFor(proj.framework) as rc}
                     <option value={rc.id} selected={currentRuntime === rc.id}>{rc.label}</option>
                   {/each}
                 </select>
@@ -1542,3 +1676,14 @@
     </div>
   {/if}
 </div>
+
+<ConfirmDialog
+  open={pendingRemove !== null}
+  danger={true}
+  busy={pendingRemove !== null && busyProject === pendingRemove}
+  title={pendingRemove ? $t('projects.confirmRemoveTitle', pendingRemove) : ''}
+  message={$t('projects.confirmRemoveMsg')}
+  confirmLabel={$t('common.delete')}
+  on:confirm={confirmRemoveProject}
+  on:cancel={() => pendingRemove = null}
+/>

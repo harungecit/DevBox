@@ -110,6 +110,14 @@ export function GetDevServerLogs(arg1, arg2) {
   return window['go']['main']['App']['GetDevServerLogs'](arg1, arg2);
 }
 
+export function GetDevTools() {
+  return window['go']['main']['App']['GetDevTools']();
+}
+
+export function GetFrameworkCatalog() {
+  return window['go']['main']['App']['GetFrameworkCatalog']();
+}
+
 export function GetGlobalRuntime(arg1) {
   return window['go']['main']['App']['GetGlobalRuntime'](arg1);
 }
@@ -262,6 +270,10 @@ export function InstallComposer() {
   return window['go']['main']['App']['InstallComposer']();
 }
 
+export function InstallDevTool(arg1) {
+  return window['go']['main']['App']['InstallDevTool'](arg1);
+}
+
 export function InstallPeclExtension(arg1, arg2) {
   return window['go']['main']['App']['InstallPeclExtension'](arg1, arg2);
 }
@@ -334,12 +346,20 @@ export function ListProjects() {
   return window['go']['main']['App']['ListProjects']();
 }
 
+export function ListTerminals() {
+  return window['go']['main']['App']['ListTerminals']();
+}
+
 export function OpenAdminer() {
   return window['go']['main']['App']['OpenAdminer']();
 }
 
 export function OpenDataDir() {
   return window['go']['main']['App']['OpenDataDir']();
+}
+
+export function OpenDevTool(arg1) {
+  return window['go']['main']['App']['OpenDevTool'](arg1);
 }
 
 export function OpenFileInEditor(arg1) {
@@ -352,6 +372,18 @@ export function OpenInBrowser(arg1) {
 
 export function OpenProjectFolder(arg1) {
   return window['go']['main']['App']['OpenProjectFolder'](arg1);
+}
+
+export function OpenProjectTerminal(arg1) {
+  return window['go']['main']['App']['OpenProjectTerminal'](arg1);
+}
+
+export function OpenServiceTerminal(arg1) {
+  return window['go']['main']['App']['OpenServiceTerminal'](arg1);
+}
+
+export function OpenTerminal() {
+  return window['go']['main']['App']['OpenTerminal']();
 }
 
 export function Quit() {
@@ -422,6 +454,10 @@ export function SetPHPIniSetting(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetPHPIniSetting'](arg1, arg2, arg3);
 }
 
+export function SetProjectAutoStart(arg1, arg2) {
+  return window['go']['main']['App']['SetProjectAutoStart'](arg1, arg2);
+}
+
 export function SetProjectPort(arg1, arg2) {
   return window['go']['main']['App']['SetProjectPort'](arg1, arg2);
 }
@@ -454,8 +490,16 @@ export function SetServicePort(arg1, arg2) {
   return window['go']['main']['App']['SetServicePort'](arg1, arg2);
 }
 
+export function SetServiceSetting(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetServiceSetting'](arg1, arg2, arg3);
+}
+
 export function SetStartMinimized(arg1) {
   return window['go']['main']['App']['SetStartMinimized'](arg1);
+}
+
+export function SetTerminal(arg1) {
+  return window['go']['main']['App']['SetTerminal'](arg1);
 }
 
 export function SetTheme(arg1) {
@@ -498,6 +542,10 @@ export function StopDevServer(arg1) {
   return window['go']['main']['App']['StopDevServer'](arg1);
 }
 
+export function StopDevTool(arg1) {
+  return window['go']['main']['App']['StopDevTool'](arg1);
+}
+
 export function StopPHPCGI() {
   return window['go']['main']['App']['StopPHPCGI']();
 }
@@ -528,6 +576,10 @@ export function UninstallAdminer() {
 
 export function UninstallBun() {
   return window['go']['main']['App']['UninstallBun']();
+}
+
+export function UninstallDevTool(arg1) {
+  return window['go']['main']['App']['UninstallDevTool'](arg1);
 }
 
 export function UninstallPeclExtension(arg1, arg2) {

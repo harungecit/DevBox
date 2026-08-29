@@ -2,6 +2,7 @@ package project
 
 import (
 	"fmt"
+	"regexp"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,14 @@ type devServerInstance struct {
 var (
 	devServers  = make(map[string]*devServerInstance)
 	devServerMu sync.Mutex
+	// stopping marks projects whose dev server DevBox is killing on purpose,
+	// so the exit hook can tell a crash from a Stop click.
+	stopping = make(map[string]bool)
+
+	// OnDevServerExit, when set, is called (on its own goroutine) every time a
+	// dev server process started by DevBox ends. crashed is false when the exit
+	// was requested through StopDevServer / StopAllDevServers.
+	OnDevServerExit func(name string, crashed bool)
 )
 
 // PID file path: ~/.devbox/services/devserver-{projectName}.pid
@@ -35,30 +44,6 @@ func devServerPidFile(projectName string) string {
 // Log file path: ~/.devbox/logs/devserver-{projectName}.log
 func devServerLogFile(projectName string) string {
 	return filepath.Join(config.GetDataDir(), "logs", fmt.Sprintf("devserver-%s.log", projectName))
-}
-
-// GetStartCommand returns the command and args to start a dev server for a given framework.
-// The port placeholder will be substituted with the actual port.
-func GetStartCommand(framework string, port int) (string, []string) {
-	portStr := strconv.Itoa(port)
-
-	switch framework {
-	case "Next.js":
-		return "npx", []string{"next", "dev", "-p", portStr}
-	case "Nuxt":
-		return "npx", []string{"nuxt", "dev", "--port", portStr}
-	case "Vue", "React", "Svelte", "Angular":
-		return "npx", []string{"vite", "--port", portStr}
-	case "Django":
-		return "python", []string{"manage.py", "runserver", fmt.Sprintf("127.0.0.1:%s", portStr)}
-	case "Python":
-		return "python", []string{"-m", "http.server", portStr}
-	case "Go":
-		return "go", []string{"run", "."}
-	case "Rust":
-		return "cargo", []string{"run"}
-	}
-	return "", nil
 }
 
 // parseCustomCommand splits a user-provided start command string into executable and args.
@@ -112,7 +97,7 @@ func StartDevServer(proj Project) (int, error) {
 	if proj.StartCommand != "" {
 		executable, args = parseCustomCommand(proj.StartCommand, actualPort)
 	} else {
-		executable, args = GetStartCommand(proj.Framework, actualPort)
+		executable, args = GetStartCommand(proj.Framework, proj.Path, actualPort)
 	}
 
 	if executable == "" {
@@ -181,13 +166,23 @@ func StartDevServer(proj Project) (int, error) {
 	}
 
 	// Let the process run independently
+	started := time.Now()
 	go func() {
 		cmd.Wait()
 		logFile.Close()
 		devServerMu.Lock()
-		delete(devServers, proj.Name)
+		// Only clear the entry if it is still ours (a restart may have replaced it).
+		if inst, ok := devServers[proj.Name]; ok && inst.process.Pid == pid {
+			delete(devServers, proj.Name)
+			os.Remove(devServerPidFile(proj.Name))
+		}
+		crashed := !stopping[proj.Name]
+		delete(stopping, proj.Name)
 		devServerMu.Unlock()
-		os.Remove(devServerPidFile(proj.Name))
+		// Immediate exits are reported synchronously by StartDevServer below.
+		if hook := OnDevServerExit; hook != nil && time.Since(started) > 2*time.Second {
+			go hook(proj.Name, crashed)
+		}
 	}()
 
 	// Wait briefly and verify the process is still alive
@@ -197,6 +192,7 @@ func StartDevServer(proj Project) (int, error) {
 		os.Remove(pidPath)
 		devServerMu.Lock()
 		delete(devServers, proj.Name)
+		delete(stopping, proj.Name)
 		devServerMu.Unlock()
 
 		// Read error details from log
@@ -217,7 +213,8 @@ func StopDevServer(projectName string) error {
 
 	// Try in-memory first
 	if inst, ok := devServers[projectName]; ok {
-		inst.process.Kill()
+		stopping[projectName] = true
+		platform.KillProcessTree(inst.process.Pid)
 		delete(devServers, projectName)
 	}
 
@@ -227,10 +224,7 @@ func StopDevServer(projectName string) error {
 	if err == nil {
 		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 		if err == nil {
-			proc, err := os.FindProcess(pid)
-			if err == nil {
-				proc.Kill()
-			}
+			platform.KillProcessTree(pid)
 		}
 		os.Remove(pidPath)
 	}
@@ -324,7 +318,8 @@ func StopAllDevServers() {
 	defer devServerMu.Unlock()
 
 	for name, inst := range devServers {
-		inst.process.Kill()
+		stopping[name] = true
+		platform.KillProcessTree(inst.process.Pid)
 		os.Remove(devServerPidFile(name))
 	}
 	devServers = make(map[string]*devServerInstance)
@@ -374,10 +369,43 @@ func GetDevServerLogs(projectName string, lines int) ([]string, error) {
 	}
 
 	allLines := splitLogLines(string(data))
+	for i, l := range allLines {
+		allLines[i] = StripANSI(l)
+	}
 	if len(allLines) > lines {
 		allLines = allLines[len(allLines)-lines:]
 	}
 	return allLines, nil
+}
+
+// ansiRe matches terminal escape sequences (colours, cursor control such as
+// "ESC[?25h") that dev servers write to their log.
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[()][A-Z0-9]|\x1b[=>]`)
+
+// StripANSI removes terminal escape sequences and control characters so log
+// lines can be shown in the UI.
+func StripANSI(s string) string {
+	s = ansiRe.ReplaceAllString(s, "")
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 && r != '\t' {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// LastMeaningfulLogLine returns the last log line that looks like a message
+// (non-empty, not a lone bracket/brace from pretty-printed JSON) for a crash
+// notice; empty when there is none.
+func LastMeaningfulLogLine(lines []string) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := strings.TrimSpace(lines[i])
+		if len(l) < 4 || strings.Trim(l, "{}[](),;|-=_ ") == "" {
+			continue
+		}
+		return l
+	}
+	return ""
 }
 
 // ResolveRuntimeVersion returns the runtime version a project should use: its

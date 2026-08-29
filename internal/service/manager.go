@@ -38,6 +38,10 @@ type AvailableVersion struct {
 type ServiceConfig struct {
 	Port    int    `json:"port"`
 	Version string `json:"version"`
+	// Connection settings editable from the info panel (see settings.go).
+	User      string `json:"user,omitempty"`
+	Password  string `json:"password,omitempty"`
+	Databases int    `json:"databases,omitempty"` // redis/valkey keyspaces
 }
 
 // ServiceInfo holds displayable service information
