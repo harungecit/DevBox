@@ -309,9 +309,9 @@ func (w *windowsPlatform) LaunchInstaller(path string) error {
 		nShow:       swShowNormal,
 	}
 	sei.cbSize = uint32(unsafe.Sizeof(sei))
-	ret, _, _ := procShellExecuteExW.Call(uintptr(unsafe.Pointer(&sei)))
+	ret, _, lastErr := procShellExecuteExW.Call(uintptr(unsafe.Pointer(&sei)))
 	if ret == 0 {
-		return fmt.Errorf("installer was not started (UAC prompt declined or launch failed)")
+		return fmt.Errorf("installer was not started (UAC prompt declined or launch failed): %v", lastErr)
 	}
 	if sei.hProcess != 0 {
 		syscall.CloseHandle(syscall.Handle(sei.hProcess))
