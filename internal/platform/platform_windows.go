@@ -222,6 +222,7 @@ type shellExecuteInfo struct {
 const (
 	seeMaskNoCloseProcess = 0x00000040
 	swHide               = 0
+	swShowNormal         = 1
 )
 
 func (w *windowsPlatform) HostsFilePath() string {
@@ -290,6 +291,31 @@ func (w *windowsPlatform) runElevated(psCommand string) error {
 		return fmt.Errorf("elevated command failed with exit code %d", exitCode)
 	}
 
+	return nil
+}
+
+// LaunchInstaller runs an installer with the "runas" verb: the UAC prompt
+// appears and the elevated process continues independently of DevBox (which
+// quits right after so the installer can replace its files).
+func (w *windowsPlatform) LaunchInstaller(path string) error {
+	verb, _ := syscall.UTF16PtrFromString("runas")
+	file, _ := syscall.UTF16PtrFromString(path)
+	dir, _ := syscall.UTF16PtrFromString(filepath.Dir(path))
+	sei := shellExecuteInfo{
+		fMask:       seeMaskNoCloseProcess,
+		lpVerb:      verb,
+		lpFile:      file,
+		lpDirectory: dir,
+		nShow:       swShowNormal,
+	}
+	sei.cbSize = uint32(unsafe.Sizeof(sei))
+	ret, _, _ := procShellExecuteExW.Call(uintptr(unsafe.Pointer(&sei)))
+	if ret == 0 {
+		return fmt.Errorf("installer was not started (UAC prompt declined or launch failed)")
+	}
+	if sei.hProcess != 0 {
+		syscall.CloseHandle(syscall.Handle(sei.hProcess))
+	}
 	return nil
 }
 

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"strconv"
@@ -190,9 +189,9 @@ func DownloadAndInstall(progress func(percent int, msg string)) (string, error) 
 	out.Close()
 
 	if goruntime.GOOS == "windows" {
-		cmd := exec.Command(dest)
-		platform.SetProcessAttrs(cmd, true, false)
-		if err := cmd.Start(); err != nil {
+		// The NSIS installer targets Program Files and therefore requires
+		// elevation; a plain exec would fail with ERROR_ELEVATION_REQUIRED.
+		if err := platform.LaunchInstaller(dest); err != nil {
 			return dest, fmt.Errorf("could not launch installer: %w", err)
 		}
 		return dest, nil

@@ -177,6 +177,10 @@ func (d *darwinPlatform) KillProcessTree(pid int) error {
 	return nil
 }
 
+func (d *darwinPlatform) LaunchInstaller(path string) error {
+	return exec.Command("open", path).Start()
+}
+
 func (d *darwinPlatform) IsProcessRunning(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil

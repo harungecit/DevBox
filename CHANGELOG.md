@@ -3,6 +3,11 @@
 All notable changes to DevBox are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [0.3.1] — 2026-08-29
+
+### Fixed
+- **In-app update did not install.** The downloaded installer needs elevation (it targets Program Files) and was launched without it, so Windows refused silently. It is now started through the shell with a UAC prompt; DevBox quits right after so the installer can replace its files.
+
 ## [0.3.0] — 2026-08-29
 
 ### Added
