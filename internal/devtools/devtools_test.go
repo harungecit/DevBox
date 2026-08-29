@@ -1,8 +1,14 @@
 package devtools
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestCatalogConsistency(t *testing.T) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
+		t.Skip("DevBox targets Windows and macOS; no platform layer here")
+	}
 	seen := map[string]bool{}
 	ports := map[int]string{}
 	for _, tool := range Catalog {

@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,9 @@ func TestRenderScripts(t *testing.T) {
 }
 
 func TestDetectHasEntries(t *testing.T) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
+		t.Skip("DevBox targets Windows and macOS; no platform layer here")
+	}
 	if len(detect()) == 0 {
 		t.Fatal("no terminals in catalog")
 	}

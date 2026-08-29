@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	runtime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,9 @@ import (
 )
 
 func TestRenderCaddyfile(t *testing.T) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
+		t.Skip("DevBox targets Windows and macOS; no platform layer here")
+	}
 	// Fake certs so the SSL project renders an https block.
 	dir := t.TempDir()
 	certDir := filepath.Join(dir, "ssl", "certs")
