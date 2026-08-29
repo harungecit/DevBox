@@ -191,7 +191,9 @@ func DownloadAndInstall(progress func(percent int, msg string)) (string, error) 
 	if goruntime.GOOS == "windows" {
 		// The NSIS installer targets Program Files and therefore requires
 		// elevation; a plain exec would fail with ERROR_ELEVATION_REQUIRED.
-		if err := platform.LaunchInstaller(dest); err != nil {
+		// /S = silent: the installer closes the running DevBox itself, copies
+		// the files and relaunches DevBox as the normal user when done.
+		if err := platform.LaunchInstaller(dest, "/S"); err != nil {
 			return dest, fmt.Errorf("could not launch installer: %w", err)
 		}
 		return dest, nil

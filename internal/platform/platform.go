@@ -13,7 +13,7 @@ type Platform interface {
 	// LaunchInstaller starts an installer package the way the shell would
 	// (Windows: ShellExecuteEx with UAC elevation, so an admin installer is
 	// not rejected with ERROR_ELEVATION_REQUIRED; macOS: open).
-	LaunchInstaller(path string) error
+	LaunchInstaller(path string, args ...string) error
 
 	// PATH management
 	GetUserPATH() ([]string, error)
@@ -59,7 +59,9 @@ func LibExt() string                                  { return current.LibExt() 
 func SetProcessAttrs(cmd *exec.Cmd, group, hide bool) { current.SetProcessAttrs(cmd, group, hide) }
 func IsProcessRunning(pid int) bool                   { return current.IsProcessRunning(pid) }
 func KillProcessTree(pid int) error                   { return current.KillProcessTree(pid) }
-func LaunchInstaller(path string) error               { return current.LaunchInstaller(path) }
+func LaunchInstaller(path string, args ...string) error {
+	return current.LaunchInstaller(path, args...)
+}
 func OpenFolder(p string) error                       { return current.OpenFolder(p) }
 func OpenFile(p string) error                         { return current.OpenFile(p) }
 func WriteHostsFileElevated(content []byte) error     { return current.WriteHostsFileElevated(content) }

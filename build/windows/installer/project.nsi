@@ -54,6 +54,9 @@ ManifestDPIAware true
 !define MUI_UNICON "..\icon.ico"
 # !define MUI_WELCOMEFINISHPAGE_BITMAP "resources\leftimage.bmp" #Include this to add a bitmap on the left side of the Welcome Page. Must be a size of 164x314
 !define MUI_FINISHPAGE_NOAUTOCLOSE # Wait on the INSTFILES page so the user can take a look into the details of the installation steps
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_TEXT "Start ${INFO_PRODUCTNAME}"
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchApp
 !define MUI_ABORTWARNING # This will warn the user if they exit from the installer.
 
 !insertmacro MUI_PAGE_WELCOME # Welcome to the installer page.
@@ -79,8 +82,41 @@ Function .onInit
    !insertmacro wails.checkArchitecture
 FunctionEnd
 
+; Close a running DevBox before touching its files (in-app update, or the
+; user forgot to quit). Waits until the executable can be written.
+Function CloseRunningApp
+    nsExec::ExecToLog 'taskkill /IM "${PRODUCT_EXECUTABLE}" /T /F'
+    Pop $0
+    IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 done
+    StrCpy $0 0
+    retry:
+        ClearErrors
+        FileOpen $1 "$INSTDIR\${PRODUCT_EXECUTABLE}" a
+        IfErrors 0 opened
+        IntOp $0 $0 + 1
+        IntCmp $0 30 done          ; ~15 s, then let the normal error surface
+        Sleep 500
+        Goto retry
+    opened:
+        FileClose $1
+    done:
+FunctionEnd
+
+; Relaunch DevBox as the logged-in user (via explorer, not elevated) — used
+; by the finish page and automatically after a silent (in-app) update.
+Function LaunchApp
+    Exec '"$WINDIR\explorer.exe" "$INSTDIR\${PRODUCT_EXECUTABLE}"'
+FunctionEnd
+
+Function .onInstSuccess
+    IfSilent 0 +2
+        Call LaunchApp
+FunctionEnd
+
 Section
     !insertmacro wails.setShellContext
+
+    Call CloseRunningApp
 
     !insertmacro wails.webview2runtime
 
@@ -99,6 +135,9 @@ SectionEnd
 
 Section "uninstall"
     !insertmacro wails.setShellContext
+
+    nsExec::ExecToLog 'taskkill /IM "${PRODUCT_EXECUTABLE}" /T /F'
+    Pop $0
 
     RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath
 

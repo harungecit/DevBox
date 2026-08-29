@@ -297,16 +297,18 @@ func (w *windowsPlatform) runElevated(psCommand string) error {
 // LaunchInstaller runs an installer with the "runas" verb: the UAC prompt
 // appears and the elevated process continues independently of DevBox (which
 // quits right after so the installer can replace its files).
-func (w *windowsPlatform) LaunchInstaller(path string) error {
+func (w *windowsPlatform) LaunchInstaller(path string, args ...string) error {
 	verb, _ := syscall.UTF16PtrFromString("runas")
 	file, _ := syscall.UTF16PtrFromString(path)
 	dir, _ := syscall.UTF16PtrFromString(filepath.Dir(path))
+	params, _ := syscall.UTF16PtrFromString(strings.Join(args, " "))
 	sei := shellExecuteInfo{
-		fMask:       seeMaskNoCloseProcess,
-		lpVerb:      verb,
-		lpFile:      file,
-		lpDirectory: dir,
-		nShow:       swShowNormal,
+		fMask:        seeMaskNoCloseProcess,
+		lpVerb:       verb,
+		lpFile:       file,
+		lpParameters: params,
+		lpDirectory:  dir,
+		nShow:        swShowNormal,
 	}
 	sei.cbSize = uint32(unsafe.Sizeof(sei))
 	ret, _, lastErr := procShellExecuteExW.Call(uintptr(unsafe.Pointer(&sei)))

@@ -177,7 +177,7 @@ func (d *darwinPlatform) KillProcessTree(pid int) error {
 	return nil
 }
 
-func (d *darwinPlatform) LaunchInstaller(path string) error {
+func (d *darwinPlatform) LaunchInstaller(path string, args ...string) error {
 	return exec.Command("open", path).Start()
 }
 
