@@ -3,6 +3,11 @@
 All notable changes to DevBox are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [0.3.2] — 2026-08-29
+
+### Fixed
+- **In-app update now completes on its own.** The installer closes a running DevBox itself (no more "Can't write DevBox.exe"), runs silently when started from the app, and relaunches DevBox as the normal user afterwards. The finish page of a manual install also offers "Start DevBox".
+
 ## [0.3.1] — 2026-08-29
 
 ### Fixed
