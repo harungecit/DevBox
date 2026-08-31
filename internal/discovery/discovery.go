@@ -388,7 +388,10 @@ func underDataDir(p string) bool {
 // Shim dirs hold tiny proxy executables — the version probe would succeed but
 // the directory is not the installation.
 func isExcludedRoot(p string) bool {
-	lower := strings.ToLower(filepath.ToSlash(p))
+	// Normalize both separator styles explicitly — filepath.ToSlash only
+	// converts the current OS's separator, which leaves Windows-style paths
+	// untouched when this code runs (or is tested) on Linux.
+	lower := strings.ToLower(strings.ReplaceAll(p, "\\", "/"))
 	return strings.Contains(lower, "/windowsapps") ||
 		strings.HasSuffix(lower, "/.cargo/bin") ||
 		strings.Contains(lower, "/chocolatey/bin") ||
