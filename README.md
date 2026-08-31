@@ -60,9 +60,15 @@ Full walkthrough with screenshots: <https://devbox.harungecit.dev/#usage>
 
 ### Services — Nginx, Apache, Caddy, FrankenPHP, PostgreSQL, MySQL, MariaDB, MongoDB, Redis, Valkey, Mailpit
 - Choose a version and a port (conflicts are caught before install), then start, stop, restart, view logs and copy connection details — all from the UI.
+- **MySQL and MariaDB — or Redis and Valkey — can run side by side** on different ports; installs and imports pick a free port automatically.
 - Services keep running from the system tray until you quit DevBox; **AUTO** starts them at login.
 - In-place updates keep your data, configs and vhosts. Major database upgrades are flagged, never forced.
 - Mailpit catches every e-mail your app sends and shows it in a web inbox — no more accidental mails to real users.
+
+### Already have it installed? Import it
+- The **Import Center** ("Import from system" on the Runtimes and Services pages) scans your machine — PATH, Program Files, nvm, scoop, XAMPP, Laragon, WAMP, Homebrew — for runtimes and services installed outside DevBox.
+- Importing manages the existing installation **in place**: nothing is moved or copied, DevBox just links to it (NTFS junction / symlink). Versions, PATH, per-project pinning and in-place updates work as if DevBox had installed it, and removing an import only removes the link.
+- Imported services run with DevBox's own configuration and a fresh data directory on a free port; the original installation and its data stay untouched.
 
 ### Projects
 - **Import** any folder, **scaffold** from a template (Laravel, Symfony, WordPress, CodeIgniter, Slim, CakePHP, Yii, Next.js, Nuxt, NestJS, Astro, SvelteKit, Vue, React, Svelte, Angular, Express, Django, Flask, FastAPI, Go, Gin, Rust, static…), or **clone** a repository.
