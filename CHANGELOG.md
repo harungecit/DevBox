@@ -3,6 +3,18 @@
 All notable changes to DevBox are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [0.4.0] — 2026-08-31
+
+### Added
+- **Import Center.** DevBox now scans your machine for runtimes (Go, Node.js, PHP, Python, Rust) and services (Nginx, Apache, Caddy, PostgreSQL, MySQL, MariaDB, MongoDB, Redis, Mailpit) installed outside DevBox — PATH, Program Files, nvm, scoop, XAMPP, Laragon, WAMP, Homebrew — and imports them **in place**: the installation is linked (NTFS junction / symlink), never moved or copied. Imported versions behave exactly like DevBox installs — global switch, PATH, per-project pinning, in-place updates — and removing one only removes the link. Imported services get a DevBox-managed configuration and a fresh data directory on a free port; the original installation and its data stay untouched. Reachable via the "Import from system" button on the Runtimes and Services pages.
+
+### Changed
+- **MySQL and MariaDB — and Redis and Valkey — can now be installed side by side** on different ports; the "one engine per group" restriction is gone (web servers stay exclusive — vhost generation assumes a single active one). Each installed engine gets its own row on the Services page, and installs/imports pick a free port automatically (MariaDB next to MySQL lands on 3307).
+- Dashboard header: the Terminal button moved next to Refresh and now uses the primary color.
+
+### Fixed
+- **Progress bar could freeze at 100% and lock the page** after fast operations (like link-based imports): the final installed/error event could overtake the last progress events and the cleared state was resurrected. Event ordering is now guaranteed for runtime installs/updates/imports, service jobs, PECL extensions, Composer, scaffolding and cloning.
+
 ## [0.3.2] — 2026-08-29
 
 ### Fixed
