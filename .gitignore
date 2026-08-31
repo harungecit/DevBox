@@ -2,3 +2,6 @@ build/bin
 node_modules
 frontend/dist
 build/windows/installer/tmp
+
+.claude/
+.wrangler/

@@ -1,0 +1,45 @@
+name: Bug report
+description: Something in DevBox doesn't work as expected
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: DevBox version
+      description: Settings page shows it, or the window title / installer name.
+      placeholder: "0.4.1"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11 23H2 / macOS 15.2"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the Services page
+        2. Install MySQL 8.4
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        Helpful locations: `C:\DevBox\logs\` (or `~/DevBox/logs/` on macOS),
+        the service's own log (Services → log icon), and for update problems
+        `%TEMP%\DevBox-update.log`. Please remove anything private.
+      render: text
