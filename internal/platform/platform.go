@@ -37,6 +37,11 @@ type Platform interface {
 	OpenFolder(path string) error
 	OpenFile(path string) error
 
+	// LinkDir makes `link` point at the existing directory `target` without
+	// copying anything: an NTFS junction on Windows (no elevation needed),
+	// a symlink on macOS. Removing the link never touches the target.
+	LinkDir(link, target string) error
+
 	// Data location
 	DefaultDataDir() string // Windows: %SystemDrive%\DevBox — macOS: ~/DevBox
 
@@ -64,6 +69,7 @@ func LaunchInstaller(path string, args ...string) error {
 }
 func OpenFolder(p string) error                       { return current.OpenFolder(p) }
 func OpenFile(p string) error                         { return current.OpenFile(p) }
+func LinkDir(link, target string) error               { return current.LinkDir(link, target) }
 func WriteHostsFileElevated(content []byte) error     { return current.WriteHostsFileElevated(content) }
 func HostsFilePath() string                           { return current.HostsFilePath() }
 func ReadHostsFile() ([]byte, error)                  { return current.ReadHostsFile() }

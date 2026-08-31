@@ -154,14 +154,16 @@
       <h2 class="text-2xl font-bold">{$t('dashboard.title')}</h2>
       <p class="text-[var(--color-text-secondary)] mt-1">{$t('dashboard.welcome')}</p>
     </div>
-    <button class="btn-secondary text-xs flex items-center gap-1.5" on:click={() => OpenTerminal()} title={$t('dashboard.openTerminalHint')}>
-      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-      {$t('dashboard.openTerminal')}
-    </button>
-    <button class="btn-secondary text-xs" on:click={loadData}>
-      <svg class="w-3.5 h-3.5 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-      {$t('common.refresh')}
-    </button>
+    <div class="flex items-center gap-2">
+      <button class="btn-primary text-xs px-3 py-1.5 gap-1.5" on:click={() => OpenTerminal()} title={$t('dashboard.openTerminalHint')}>
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        {$t('dashboard.openTerminal')}
+      </button>
+      <button class="btn-secondary text-xs" on:click={loadData}>
+        <svg class="w-3.5 h-3.5 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        {$t('common.refresh')}
+      </button>
+    </div>
   </div>
 
   <!-- Front-door proxy status -->

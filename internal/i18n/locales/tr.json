@@ -458,5 +458,17 @@
   "update.downloading": "Güncelleme indiriliyor…",
   "update.notes": "Sürüm notları",
   "update.lastChecked": "Son denetim {0}",
-  "update.banner": "Güncelleme {0}"
+  "update.banner": "Güncelleme {0}",
+
+  "discovery.centerTitle": "İçe Aktarma Merkezi",
+  "discovery.centerButton": "Sistemden içe aktar",
+  "discovery.centerDesc": "Bu bilgisayarda zaten kurulu olan yazılımlar yerinde DevBox yönetimine alınır — hiçbir şey taşınmaz veya kopyalanmaz, DevBox yalnızca bağlantı oluşturur. İçe aktarılan bir öğeyi sonradan kaldırmak yalnızca bağlantıyı söker.",
+  "discovery.servicesNote": "Servisler DevBox'ın kendi yapılandırması ve temiz bir veri diziniyle çalışır; orijinal kurulum ve verileri olduğu gibi bırakılır.",
+  "discovery.rescan": "Yeniden tara",
+  "discovery.scanning": "Taranıyor...",
+  "discovery.import": "İçe aktar",
+  "discovery.importing": "Aktarılıyor...",
+  "discovery.importHint": "Bu kurulumu DevBox'tan yönet — yerinde, hiçbir şey taşınmaz",
+  "discovery.conflictHint": "{0} zaten kurulu — önce onu kaldırın",
+  "discovery.empty": "Dışarıdan kurulmuş bir şey bulunamadı. Bu bilgisayardaki her şey ya zaten DevBox yönetiminde ya da kurulu değil."
 }

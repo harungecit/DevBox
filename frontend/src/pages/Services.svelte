@@ -22,6 +22,7 @@
     SetServiceAutoStart,
     OpenServiceTerminal,
   } from '../../wailsjs/go/main/App';
+  import ImportCenter from '../lib/components/ImportCenter.svelte';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { serviceInstalls, startServiceInstall, clearServiceInstall } from '../lib/stores/installs';
 
@@ -123,6 +124,48 @@
   let autoStartSvcs: string[] = [];
   let errorMessage: string = '';
 
+  // A rendered row on the page. Variant groups (MySQL/MariaDB, Redis/Valkey)
+  // are flattened: every installed variant gets its own row, and one extra
+  // "install" row offers the variants that are not installed yet — both
+  // engines can run side by side on different ports.
+  interface ServiceRow {
+    svc: ServiceDef;
+    variant: ServiceVariant | null; // installed variant this row represents
+    remaining: ServiceVariant[]; // for install rows of variant groups
+  }
+
+  function categoryRows(svcs: ServiceDef[], statuses: Record<string, ServiceInfo>): ServiceRow[] {
+    const rows: ServiceRow[] = [];
+    for (const svc of svcs) {
+      if (!svc.variants) {
+        rows.push({ svc, variant: null, remaining: [] });
+        continue;
+      }
+      for (const v of svc.variants.filter(v => statuses[v.id]?.installed)) {
+        rows.push({ svc, variant: v, remaining: [] });
+      }
+      const remaining = svc.variants.filter(v => !statuses[v.id]?.installed);
+      if (remaining.length > 0) {
+        rows.push({ svc, variant: null, remaining });
+      }
+    }
+    return rows;
+  }
+
+  // suggestPort bumps past ports already assigned to installed services so a
+  // second engine (MariaDB next to MySQL) defaults to 3307, not a collision.
+  function suggestPort(start: number): number {
+    const used = new Set(
+      Object.values(serviceStatuses).filter(s => s.installed).map(s => s.port)
+    );
+    let p = start;
+    while (used.has(p)) p++;
+    return p;
+  }
+
+  // Import Center modal (external installations found on this machine).
+  let showImportCenter: boolean = false;
+
   // Install state is sourced from the global store so progress survives page
   // unmount. `installing` stays as a derived string for compatibility with the
   // many UI checks below (isInstalling per row, button disabled flags, etc.).
@@ -141,6 +184,9 @@
 
   // Install dialog state
   let dialogSvc: ServiceDef | null = null;
+  // Variants offered in the dialog — for a group with one engine already
+  // installed, only the remaining engine(s).
+  let dialogVariants: ServiceVariant[] | null = null;
   let showInstallDialog: boolean = false;
   let selectedVariant: string = '';
   let installVersions: AvailableVersion[] = [];
@@ -202,16 +248,18 @@
     loadingVersions = false;
   }
 
-  // Open install dialog
-  async function openInstallDialog(svc: ServiceDef) {
+  // Open install dialog. `variants` narrows the engine choice (e.g. only the
+  // not-yet-installed engine of a group); defaults to all of the group's.
+  async function openInstallDialog(svc: ServiceDef, variants: ServiceVariant[] | null = null) {
     dialogSvc = svc;
+    dialogVariants = variants ?? svc.variants ?? null;
     showInstallDialog = true;
-    selectedPort = svc.defaultPort;
+    selectedPort = suggestPort(svc.defaultPort);
     portAvailable = true;
     portMessage = '';
 
-    if (svc.variants) {
-      selectedVariant = svc.variants[0].id;
+    if (dialogVariants && dialogVariants.length > 0) {
+      selectedVariant = dialogVariants[0].id;
     } else {
       selectedVariant = svc.id;
     }
@@ -411,9 +459,19 @@
 </script>
 
 <div class="space-y-6">
-  <div>
-    <h2 class="text-2xl font-bold">{$t('services.title')}</h2>
-    <p class="text-[var(--color-text-secondary)] mt-1">{$t('services.subtitle')}</p>
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <h2 class="text-2xl font-bold">{$t('services.title')}</h2>
+      <p class="text-[var(--color-text-secondary)] mt-1">{$t('services.subtitle')}</p>
+    </div>
+    <button
+      class="text-xs px-3 py-1.5 rounded-lg font-medium border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-primary-500 hover:border-primary-500/40 transition-colors flex items-center gap-1.5 shrink-0 mt-1"
+      on:click={() => showImportCenter = true}
+      title={$t('discovery.centerTitle')}
+    >
+      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      {$t('discovery.centerButton')}
+    </button>
   </div>
 
   {#if errorMessage}
@@ -437,7 +495,7 @@
       <div class="card">
         <div class="flex items-center gap-3 mb-2">
           <div class="w-6 h-6">{@html serviceLogos[installing] || ''}</div>
-          <span class="text-sm font-medium">{$t('runtimes.downloading')} {installing}</span>
+          <span class="text-sm font-medium">{currentServiceInstall.importing ? $t('discovery.importing') : $t('runtimes.downloading')} {installing}</span>
         </div>
         <ProgressBar percent={currentServiceInstall.percent} message={currentServiceInstall.message} />
       </div>
@@ -452,11 +510,11 @@
         <p class="text-xs text-[var(--color-text-secondary)] mb-5">{$t(dialogSvc.descKey)}</p>
 
         <!-- Variant Selector (for grouped services) -->
-        {#if dialogSvc.variants}
+        {#if dialogVariants && dialogVariants.length > 0}
           <div class="mb-5">
             <span class="block text-sm font-medium mb-2">{$t('services.selectEngine')}</span>
-            <div class="grid gap-2" style="grid-template-columns: repeat({dialogSvc.variants.length}, 1fr)">
-              {#each dialogSvc.variants as variant}
+            <div class="grid gap-2" style="grid-template-columns: repeat({dialogVariants.length}, 1fr)">
+              {#each dialogVariants as variant}
                 <button
                   class="p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 {selectedVariant === variant.id ? 'border-primary-500 bg-primary-500/5' : 'border-[var(--color-border)] hover:border-primary-300'}"
                   on:click={() => selectVariant(variant.id)}
@@ -542,28 +600,30 @@
       </div>
 
       <div class="space-y-3">
-        {#each category.services as svc}
-          <!-- Compute active variant and effective IDs -->
-          {@const activeVar = svc.variants?.find(v => serviceStatuses[v.id]?.installed) || null}
+        {#each categoryRows(category.services, serviceStatuses) as row (row.svc.id + ':' + (row.variant?.id || 'install'))}
+          <!-- Each row is either one installed variant or the install offer -->
+          {@const svc = row.svc}
+          {@const activeVar = row.variant}
           {@const eid = activeVar?.id || svc.id}
           {@const info = serviceStatuses[eid]}
           {@const status = info?.status || 'not_installed'}
           {@const installed = info?.installed || false}
           {@const version = info?.version || '-'}
           {@const port = info?.port || svc.defaultPort}
-          {@const displayName = activeVar ? activeVar.name : svc.name}
-          {@const logoId = activeVar?.id || (svc.variants?.[0]?.id || svc.id)}
-          {@const isInstalling = svc.variants ? svc.variants.some(v => v.id === installing) : installing === svc.id}
+          {@const displayName = activeVar
+            ? activeVar.name
+            : (row.remaining.length > 0 ? row.remaining.map(v => v.name).join(' / ') : svc.name)}
+          {@const logoId = activeVar?.id || (row.remaining[0]?.id || svc.id)}
           {@const isBusy = busyService === eid}
 
           <div class="card p-4">
             <div class="flex items-center justify-between gap-6">
               <!-- Left: Logo & Info -->
               <div class="flex items-center gap-4 flex-1 min-w-0">
-                {#if !installed && svc.variants}
-                  <!-- Show all variant logos when not installed -->
+                {#if !installed && row.remaining.length > 1}
+                  <!-- Show the logos of the engines still available to install -->
                   <div class="flex -space-x-1.5 flex-shrink-0">
-                    {#each svc.variants as v}
+                    {#each row.remaining as v}
                       <div class="w-10 h-10 rounded-lg overflow-hidden border-2 border-[var(--color-card)] shadow-sm">
                         {@html serviceLogos[v.id] || ''}
                       </div>
@@ -662,7 +722,7 @@
                 {:else if status === 'not_installed'}
                   <button
                     class="btn-icon bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
-                    on:click={() => openInstallDialog(svc)}
+                    on:click={() => openInstallDialog(svc, row.remaining.length > 0 ? row.remaining : null)}
                     disabled={installing !== '' || busyService !== ''}
                     title={$t('services.install')}
                   >
@@ -816,3 +876,5 @@
   on:confirm={confirmUpdate}
   on:cancel={() => pendingUpdate = null}
 />
+
+<ImportCenter open={showImportCenter} on:close={() => showImportCenter = false} />

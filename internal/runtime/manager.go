@@ -71,17 +71,31 @@ func listInstalledVersions(name string) ([]string, error) {
 
 	var versions []string
 	for _, e := range entries {
-		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if e.IsDir() {
+			versions = append(versions, e.Name())
+			continue
+		}
+		// Imported external installs are junctions/symlinks, which ReadDir
+		// does not report as directories — resolve them explicitly. A link
+		// whose target vanished simply stops being listed.
+		if fi, err := os.Stat(filepath.Join(baseDir, e.Name())); err == nil && fi.IsDir() {
 			versions = append(versions, e.Name())
 		}
 	}
 	return versions, nil
 }
 
-// uninstallVersion removes an installed version directory
+// uninstallVersion removes an installed version directory. For an imported
+// (linked) version only the junction/symlink is removed — the external
+// installation it points at is never touched (os.RemoveAll unlinks reparse
+// points without descending into them). Lstat is used so a dangling link can
+// still be cleaned up.
 func uninstallVersion(name, version string) error {
 	dir := filepath.Join(runtimeBaseDir(name), version)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
+	if _, err := os.Lstat(dir); os.IsNotExist(err) {
 		return fmt.Errorf("version %s is not installed", version)
 	}
 	return os.RemoveAll(dir)

@@ -26,6 +26,7 @@
     GetPHPIniPath,
     OpenFileInEditor,
   } from '../../wailsjs/go/main/App';
+  import ImportCenter from '../lib/components/ImportCenter.svelte';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { runtimeInstalls, startRuntimeInstall, clearRuntimeInstall } from '../lib/stores/installs';
 
@@ -93,6 +94,9 @@
     port: number;
     pid: number;
   }
+
+  // Import Center modal (external installations found on this machine).
+  let showImportCenter: boolean = false;
 
   let activeTab: string = 'go';
   let installedVersions: VersionInfo[] = [];
@@ -415,9 +419,19 @@
 </script>
 
 <div class="space-y-6">
-  <div>
-    <h2 class="text-2xl font-bold">{$t('runtimes.title')}</h2>
-    <p class="text-[var(--color-text-secondary)] mt-1">{$t('runtimes.subtitle')}</p>
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <h2 class="text-2xl font-bold">{$t('runtimes.title')}</h2>
+      <p class="text-[var(--color-text-secondary)] mt-1">{$t('runtimes.subtitle')}</p>
+    </div>
+    <button
+      class="text-xs px-3 py-1.5 rounded-lg font-medium border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-primary-500 hover:border-primary-500/40 transition-colors flex items-center gap-1.5 shrink-0 mt-1"
+      on:click={() => showImportCenter = true}
+      title={$t('discovery.centerTitle')}
+    >
+      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      {$t('discovery.centerButton')}
+    </button>
   </div>
 
   <!-- Runtime Tabs -->
@@ -463,7 +477,7 @@
       <div class="card">
         <div class="flex items-center gap-3 mb-2">
           <div class="w-2 h-2 rounded-full bg-primary-500 animate-pulse"></div>
-          <span class="text-sm font-medium">{$t('runtimes.downloading')} {activeTab} {currentInstall.version}</span>
+          <span class="text-sm font-medium">{currentInstall.importing ? $t('discovery.importing') : $t('runtimes.downloading')} {activeTab} {currentInstall.version}</span>
         </div>
         <ProgressBar percent={currentInstall.percent} message={currentInstall.message} />
       </div>
@@ -812,6 +826,8 @@
     </div>
   </div>
 </div>
+
+<ImportCenter open={showImportCenter} on:close={() => showImportCenter = false} />
 
 <ConfirmDialog
   open={pendingUninstall !== null}

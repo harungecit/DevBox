@@ -10,6 +10,7 @@ import {devtools} from '../models';
 import {main} from '../models';
 import {runtime} from '../models';
 import {terminal} from '../models';
+import {discovery} from '../models';
 
 export function AddProject(arg1:string,arg2:string):Promise<project.Project>;
 
@@ -135,6 +136,10 @@ export function GetYarnVersion():Promise<string>;
 
 export function HideToTray():Promise<void>;
 
+export function ImportExternalRuntime(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function ImportExternalService(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function InstallAdminer():Promise<void>;
 
 export function InstallAppUpdate():Promise<void>;
@@ -222,6 +227,8 @@ export function RestartPHPCGI():Promise<void>;
 export function RestartService(arg1:string):Promise<void>;
 
 export function ScaffoldNewProject(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function ScanExternalSoftware(arg1:boolean):Promise<Array<discovery.Found>>;
 
 export function SelectParentFolder():Promise<string>;
 

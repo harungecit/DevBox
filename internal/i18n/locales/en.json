@@ -458,5 +458,17 @@
   "update.downloading": "Downloading update…",
   "update.notes": "Release notes",
   "update.lastChecked": "Last checked {0}",
-  "update.banner": "Update {0}"
+  "update.banner": "Update {0}",
+
+  "discovery.centerTitle": "Import Center",
+  "discovery.centerButton": "Import from system",
+  "discovery.centerDesc": "Software already installed on this computer is brought under DevBox management in place — nothing is moved or copied, DevBox just links to it. Removing an imported item later only removes the link.",
+  "discovery.servicesNote": "Services run with DevBox's own configuration and a fresh data directory; the original installation and its data are left untouched.",
+  "discovery.rescan": "Rescan",
+  "discovery.scanning": "Scanning...",
+  "discovery.import": "Import",
+  "discovery.importing": "Importing...",
+  "discovery.importHint": "Manage this installation from DevBox — in place, nothing is moved",
+  "discovery.conflictHint": "{0} is already installed — uninstall it first",
+  "discovery.empty": "No external installations found. Everything on this computer is either already managed by DevBox or not installed."
 }

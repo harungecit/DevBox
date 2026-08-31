@@ -132,6 +132,33 @@ export namespace devtools {
 
 }
 
+export namespace discovery {
+	
+	export class Found {
+	    kind: string;
+	    name: string;
+	    displayName: string;
+	    version: string;
+	    path: string;
+	    conflict: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Found(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.name = source["name"];
+	        this.displayName = source["displayName"];
+	        this.version = source["version"];
+	        this.path = source["path"];
+	        this.conflict = source["conflict"];
+	    }
+	}
+
+}
+
 export namespace main {
 	
 	export class CloudflareVerifyResult {

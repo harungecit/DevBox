@@ -91,17 +91,19 @@ func Register(sm ServiceManager) {
 
 // ConflictGroups maps service names to their mutual exclusion group.
 // Only one service per group can be installed at a time.
+//
+// Only web servers are mutually exclusive: vhost generation, the front-door
+// proxy handoff and project routing all assume a single active web server.
+// Databases and caches (MySQL + MariaDB, Redis + Valkey) coexist fine on
+// different ports, so they carry no conflict group.
+//
 // Note: FrankenPHP intentionally is NOT in "webserver" — it bundles its own
 // webserver and PHP runtime, and is selected per-project rather than globally,
 // so it can coexist with nginx/apache/caddy as long as ports differ.
 var ConflictGroups = map[string]string{
-	"nginx":   "webserver",
-	"apache":  "webserver",
-	"caddy":   "webserver",
-	"mysql":   "mysql-compat",
-	"mariadb": "mysql-compat",
-	"redis":   "kv-cache",
-	"valkey":  "kv-cache",
+	"nginx":  "webserver",
+	"apache": "webserver",
+	"caddy":  "webserver",
 }
 
 // GetConflictingService returns the display name of an installed service

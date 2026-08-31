@@ -6,12 +6,16 @@ export interface RuntimeInstallState {
   percent: number;
   message: string;
   error?: string;
+  // true when this is an in-place import (link), not a download — the UI
+  // shows "Importing..." instead of "Downloading...".
+  importing?: boolean;
 }
 
 export interface ServiceInstallState {
   percent: number;
   message: string;
   error?: string;
+  importing?: boolean;
 }
 
 // Map of runtime-name → in-flight install state. Present while an install is
@@ -44,6 +48,7 @@ export function initInstallListeners() {
         percent: typeof data.percent === 'number' ? data.percent : 0,
         message: data.message ?? '',
         error: undefined,
+        importing: s[data.name]?.importing,
       },
     }));
   });
@@ -77,6 +82,7 @@ export function initInstallListeners() {
         percent: typeof data.percent === 'number' ? data.percent : 0,
         message: data.message ?? '',
         error: undefined,
+        importing: s[data.name]?.importing,
       },
     }));
   });
@@ -107,10 +113,10 @@ export const initRuntimeInstallListeners = initInstallListeners;
 
 // Call when the user clicks Install on a runtime — the UI flips to "starting…"
 // immediately, without waiting for the first backend progress event.
-export function startRuntimeInstall(name: string, version: string) {
+export function startRuntimeInstall(name: string, version: string, importing: boolean = false) {
   _runtimeInstalls.update(s => ({
     ...s,
-    [name]: { version, percent: 0, message: '', error: undefined },
+    [name]: { version, percent: 0, message: '', error: undefined, importing },
   }));
 }
 
@@ -122,10 +128,10 @@ export function clearRuntimeInstall(name: string) {
 }
 
 // Service equivalents.
-export function startServiceInstall(name: string, initialMessage: string = '') {
+export function startServiceInstall(name: string, initialMessage: string = '', importing: boolean = false) {
   _serviceInstalls.update(s => ({
     ...s,
-    [name]: { percent: 0, message: initialMessage, error: undefined },
+    [name]: { percent: 0, message: initialMessage, error: undefined, importing },
   }));
 }
 

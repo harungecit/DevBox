@@ -474,38 +474,64 @@ func (a *App) InstallRuntime(name, version string) error {
 		return fmt.Errorf("unknown runtime: %s", name)
 	}
 
+	a.runRuntimeJob(name, version, func(progress chan<- runtime.Progress) error {
+		return mgr.Install(version, progress)
+	}, func() map[string]interface{} {
+		// Auto-set as global if it's the first install
+		global, _ := mgr.GetGlobal()
+		if global == "" {
+			mgr.SetGlobal(version)
+			pathenv.AddToPath(mgr.BinaryPath(version))
+		}
+		return nil
+	})
+	return nil
+}
+
+// runRuntimeJob runs an install-like runtime job in the background. The final
+// runtime:installed / runtime:error event is emitted only AFTER every queued
+// progress event has been forwarded — emitting it earlier lets a late
+// runtime:progress event resurrect the already-cleared install state in the
+// frontend store and leaves a progress bar stuck at 100% (very visible with
+// near-instant jobs like link-based imports). `extra` runs on success and may
+// return additional fields for the runtime:installed payload.
+func (a *App) runRuntimeJob(name, version string, job func(chan<- runtime.Progress) error, extra func() map[string]interface{}) {
 	go func() {
 		progress := make(chan runtime.Progress, 10)
+		errCh := make(chan error, 1)
 
 		go func() {
 			defer close(progress)
-			err := mgr.Install(version, progress)
-			if err != nil {
-				wailsRuntime.EventsEmit(a.ctx, "runtime:error", map[string]interface{}{
-					"name":    name,
-					"version": version,
-					"error":   err.Error(),
-				})
-				return
-			}
-
-			// Auto-set as global if it's the first install
-			global, _ := mgr.GetGlobal()
-			if global == "" {
-				mgr.SetGlobal(version)
-				pathenv.AddToPath(mgr.BinaryPath(version))
-			}
-
-			wailsRuntime.EventsEmit(a.ctx, "runtime:installed", map[string]interface{}{
-				"name":    name,
-				"version": version,
-			})
+			defer func() {
+				if r := recover(); r != nil {
+					debugLog("runtime job PANIC: %v", r)
+					errCh <- fmt.Errorf("internal error: %v", r)
+				}
+			}()
+			errCh <- job(progress)
 		}()
 
+		// Returns once the job closed the channel — every progress event has
+		// been emitted by then.
 		a.forwardRuntimeProgress(name, version, progress)
-	}()
 
-	return nil
+		if err := <-errCh; err != nil {
+			wailsRuntime.EventsEmit(a.ctx, "runtime:error", map[string]interface{}{
+				"name":    name,
+				"version": version,
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		payload := map[string]interface{}{"name": name, "version": version}
+		if extra != nil {
+			for k, v := range extra() {
+				payload[k] = v
+			}
+		}
+		wailsRuntime.EventsEmit(a.ctx, "runtime:installed", payload)
+	}()
 }
 
 func (a *App) forwardRuntimeProgress(name, version string, progress <-chan runtime.Progress) {
@@ -532,76 +558,59 @@ func (a *App) UpdateRuntime(name, from, to string) error {
 		return fmt.Errorf("%s → %s is not an in-place update; install it as a separate version", from, to)
 	}
 
-	go func() {
-		progress := make(chan runtime.Progress, 10)
-
-		go func() {
-			defer close(progress)
-			fail := func(err error) {
-				wailsRuntime.EventsEmit(a.ctx, "runtime:error", map[string]interface{}{
-					"name": name, "version": to, "error": err.Error(),
-				})
+	a.runRuntimeJob(name, to, func(progress chan<- runtime.Progress) error {
+		// The target may already be installed (user installed it separately
+		// earlier): then this is a consolidation — skip the download.
+		if _, err := os.Stat(mgr.BinaryPath(to)); err != nil {
+			if err := mgr.Install(to, progress); err != nil {
+				return err
 			}
+		}
 
-			// The target may already be installed (user installed it separately
-			// earlier): then this is a consolidation — skip the download.
-			if _, err := os.Stat(mgr.BinaryPath(to)); err != nil {
-				if err := mgr.Install(to, progress); err != nil {
-					fail(err)
-					return
+		progress <- runtime.Progress{Percent: 99, Message: "Migrating settings from " + from + "..."}
+		runtime.MigrateVersionData(name, from, to, progress)
+
+		global, _ := mgr.GetGlobal()
+		if global == from {
+			pathenv.RemoveFromPath(mgr.BinaryPath(from))
+			mgr.SetGlobal(to)
+			pathenv.AddToPath(mgr.BinaryPath(to))
+		}
+
+		// Re-point project pins.
+		if projects, err := project.ListProjects(); err == nil {
+			changed := false
+			for i := range projects {
+				if projects[i].Runtime == name && projects[i].RuntimeVersion == from {
+					projects[i].RuntimeVersion = to
+					changed = true
 				}
 			}
-
-			progress <- runtime.Progress{Percent: 99, Message: "Migrating settings from " + from + "..."}
-			runtime.MigrateVersionData(name, from, to, progress)
-
-			global, _ := mgr.GetGlobal()
-			if global == from {
-				pathenv.RemoveFromPath(mgr.BinaryPath(from))
-				mgr.SetGlobal(to)
-				pathenv.AddToPath(mgr.BinaryPath(to))
+			if changed {
+				project.SaveProjects(projects)
 			}
+		}
 
-			// Re-point project pins.
-			if projects, err := project.ListProjects(); err == nil {
-				changed := false
-				for i := range projects {
-					if projects[i].Runtime == name && projects[i].RuntimeVersion == from {
-						projects[i].RuntimeVersion = to
-						changed = true
-					}
-				}
-				if changed {
-					project.SaveProjects(projects)
-				}
+		if name == "php" {
+			runtime.StopPHPCGIVersion(from)
+			cfg := config.Get()
+			if p, ok := cfg.PhpCgiPorts[from]; ok {
+				cfg.PhpCgiPorts[to] = p
+				delete(cfg.PhpCgiPorts, from)
+				config.Save()
 			}
+		}
 
-			if name == "php" {
-				runtime.StopPHPCGIVersion(from)
-				cfg := config.Get()
-				if p, ok := cfg.PhpCgiPorts[from]; ok {
-					cfg.PhpCgiPorts[to] = p
-					delete(cfg.PhpCgiPorts, from)
-					config.Save()
-				}
-			}
+		progress <- runtime.Progress{Percent: 99, Message: "Removing " + from + "..."}
+		if err := mgr.Uninstall(from); err != nil {
+			progress <- runtime.Progress{Percent: 99, Message: "Old version could not be removed: " + err.Error()}
+		}
 
-			progress <- runtime.Progress{Percent: 99, Message: "Removing " + from + "..."}
-			if err := mgr.Uninstall(from); err != nil {
-				progress <- runtime.Progress{Percent: 99, Message: "Old version could not be removed: " + err.Error()}
-			}
-
-			a.regenerateAllVhosts()
-
-			wailsRuntime.EventsEmit(a.ctx, "runtime:installed", map[string]interface{}{
-				"name":        name,
-				"version":     to,
-				"updatedFrom": from,
-			})
-		}()
-
-		a.forwardRuntimeProgress(name, to, progress)
-	}()
+		a.regenerateAllVhosts()
+		return nil
+	}, func() map[string]interface{} {
+		return map[string]interface{}{"updatedFrom": from}
+	})
 	return nil
 }
 
@@ -984,33 +993,24 @@ func (a *App) UpdateService(name string, version string) error {
 func (a *App) runServiceJob(name string, job func(chan<- service.Progress) error, after func()) {
 	go func() {
 		progress := make(chan service.Progress, 10)
+		errCh := make(chan error, 1)
 
 		go func() {
 			defer close(progress)
 			defer func() {
 				if r := recover(); r != nil {
 					debugLog("service job PANIC: %v", r)
-					wailsRuntime.EventsEmit(a.ctx, "service:error", map[string]interface{}{
-						"name": name, "error": fmt.Sprintf("internal error: %v", r),
-					})
+					errCh <- fmt.Errorf("internal error: %v", r)
 				}
 			}()
-			if err := job(progress); err != nil {
-				debugLog("service job %s error: %v", name, err)
-				wailsRuntime.EventsEmit(a.ctx, "service:error", map[string]interface{}{
-					"name":  name,
-					"error": err.Error(),
-				})
-				return
-			}
-			if after != nil {
-				after()
-			}
-			wailsRuntime.EventsEmit(a.ctx, "service:installed", map[string]interface{}{
-				"name": name,
-			})
+			errCh <- job(progress)
 		}()
 
+		// Drain every progress event BEFORE emitting the final event: a
+		// service:progress arriving after service:installed would resurrect
+		// the already-cleared install state in the frontend store and leave a
+		// stuck progress bar (very visible with near-instant jobs like
+		// link-based imports).
 		for p := range progress {
 			wailsRuntime.EventsEmit(a.ctx, "service:progress", map[string]interface{}{
 				"name":    name,
@@ -1018,6 +1018,21 @@ func (a *App) runServiceJob(name string, job func(chan<- service.Progress) error
 				"message": p.Message,
 			})
 		}
+
+		if err := <-errCh; err != nil {
+			debugLog("service job %s error: %v", name, err)
+			wailsRuntime.EventsEmit(a.ctx, "service:error", map[string]interface{}{
+				"name":  name,
+				"error": err.Error(),
+			})
+			return
+		}
+		if after != nil {
+			after()
+		}
+		wailsRuntime.EventsEmit(a.ctx, "service:installed", map[string]interface{}{
+			"name": name,
+		})
 	}()
 }
 
@@ -1569,17 +1584,20 @@ func (a *App) GetPeclExtensions(version string) []runtime.PeclExtension {
 func (a *App) InstallPeclExtension(version, name string) error {
 	go func() {
 		progress := make(chan runtime.Progress, 10)
+		errCh := make(chan error, 1)
 		go func() {
 			defer close(progress)
-			if err := runtime.InstallPeclExtension(version, name, progress); err != nil {
-				wailsRuntime.EventsEmit(a.ctx, "phpext:error", map[string]interface{}{"version": version, "name": name, "error": err.Error()})
-				return
-			}
-			wailsRuntime.EventsEmit(a.ctx, "phpext:installed", map[string]interface{}{"version": version, "name": name})
+			errCh <- runtime.InstallPeclExtension(version, name, progress)
 		}()
+		// Drain progress fully before the final event (see runRuntimeJob).
 		for p := range progress {
 			wailsRuntime.EventsEmit(a.ctx, "phpext:progress", map[string]interface{}{"version": version, "name": name, "percent": p.Percent, "message": p.Message})
 		}
+		if err := <-errCh; err != nil {
+			wailsRuntime.EventsEmit(a.ctx, "phpext:error", map[string]interface{}{"version": version, "name": name, "error": err.Error()})
+			return
+		}
+		wailsRuntime.EventsEmit(a.ctx, "phpext:installed", map[string]interface{}{"version": version, "name": name})
 	}()
 	return nil
 }
@@ -1654,23 +1672,25 @@ func (a *App) IsComposerInstalled() bool {
 func (a *App) InstallComposer() error {
 	go func() {
 		progress := make(chan runtime.Progress, 10)
+		errCh := make(chan error, 1)
 		go func() {
 			defer close(progress)
-			err := runtime.InstallComposer(progress)
-			if err != nil {
-				wailsRuntime.EventsEmit(a.ctx, "composer:error", map[string]interface{}{
-					"error": err.Error(),
-				})
-				return
-			}
-			wailsRuntime.EventsEmit(a.ctx, "composer:installed", map[string]interface{}{})
+			errCh <- runtime.InstallComposer(progress)
 		}()
+		// Drain progress fully before the final event (see runRuntimeJob).
 		for p := range progress {
 			wailsRuntime.EventsEmit(a.ctx, "composer:progress", map[string]interface{}{
 				"percent": p.Percent,
 				"message": p.Message,
 			})
 		}
+		if err := <-errCh; err != nil {
+			wailsRuntime.EventsEmit(a.ctx, "composer:error", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+		wailsRuntime.EventsEmit(a.ctx, "composer:installed", map[string]interface{}{})
 	}()
 	return nil
 }
@@ -1995,40 +2015,42 @@ func (a *App) ScaffoldNewProject(templateID, parentDir, name, domain string) err
 	}
 	go func() {
 		progress := make(chan project.ScaffoldProgress, 10)
+		errCh := make(chan error, 1)
 
 		go func() {
 			defer close(progress)
-			err := project.ScaffoldProject(templateID, parentDir, name, progress)
-			if err != nil {
-				wailsRuntime.EventsEmit(a.ctx, "scaffold:error", map[string]interface{}{
-					"error": err.Error(),
-				})
+			if err := project.ScaffoldProject(templateID, parentDir, name, progress); err != nil {
+				errCh <- err
 				return
 			}
-
 			// Register the project
-			projectPath := filepath.Join(parentDir, name)
-			if _, err := project.AddProject(projectPath, domain); err != nil {
-				wailsRuntime.EventsEmit(a.ctx, "scaffold:error", map[string]interface{}{
-					"error": err.Error(),
-				})
+			if _, err := project.AddProject(filepath.Join(parentDir, name), domain); err != nil {
+				errCh <- err
 				return
 			}
 			progress <- project.ScaffoldProgress{Percent: 98, Message: "Registering domain, SSL and vhost..."}
 			a.provisionProject(name)
-
-			wailsRuntime.EventsEmit(a.ctx, "scaffold:complete", map[string]interface{}{
-				"name": name,
-				"path": projectPath,
-			})
+			errCh <- nil
 		}()
 
+		// Drain progress fully before the final event (see runRuntimeJob).
 		for p := range progress {
 			wailsRuntime.EventsEmit(a.ctx, "scaffold:progress", map[string]interface{}{
 				"percent": p.Percent,
 				"message": p.Message,
 			})
 		}
+
+		if err := <-errCh; err != nil {
+			wailsRuntime.EventsEmit(a.ctx, "scaffold:error", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+		wailsRuntime.EventsEmit(a.ctx, "scaffold:complete", map[string]interface{}{
+			"name": name,
+			"path": filepath.Join(parentDir, name),
+		})
 	}()
 
 	return nil
@@ -2039,48 +2061,50 @@ func (a *App) CloneGitProject(gitURL, parentDir, name, domain string) error {
 	if parentDir == "" {
 		parentDir = a.GetDefaultProjectsDir()
 	}
+	// Derive actual project name
+	actualName := name
+	if actualName == "" {
+		parts := strings.Split(strings.TrimSuffix(gitURL, "/"), "/")
+		actualName = strings.TrimSuffix(parts[len(parts)-1], ".git")
+	}
+
 	go func() {
 		progress := make(chan project.ScaffoldProgress, 10)
+		errCh := make(chan error, 1)
 
 		go func() {
 			defer close(progress)
-			err := project.CloneProject(gitURL, parentDir, name, progress)
-			if err != nil {
-				wailsRuntime.EventsEmit(a.ctx, "clone:error", map[string]interface{}{
-					"error": err.Error(),
-				})
+			if err := project.CloneProject(gitURL, parentDir, name, progress); err != nil {
+				errCh <- err
 				return
 			}
-
-			// Derive actual project name
-			actualName := name
-			if actualName == "" {
-				parts := strings.Split(strings.TrimSuffix(gitURL, "/"), "/")
-				actualName = strings.TrimSuffix(parts[len(parts)-1], ".git")
-			}
-
-			projectPath := filepath.Join(parentDir, actualName)
-			if _, err := project.AddProject(projectPath, domain); err != nil {
-				wailsRuntime.EventsEmit(a.ctx, "clone:error", map[string]interface{}{
-					"error": err.Error(),
-				})
+			if _, err := project.AddProject(filepath.Join(parentDir, actualName), domain); err != nil {
+				errCh <- err
 				return
 			}
 			progress <- project.ScaffoldProgress{Percent: 98, Message: "Registering domain, SSL and vhost..."}
 			a.provisionProject(actualName)
-
-			wailsRuntime.EventsEmit(a.ctx, "clone:complete", map[string]interface{}{
-				"name": actualName,
-				"path": projectPath,
-			})
+			errCh <- nil
 		}()
 
+		// Drain progress fully before the final event (see runRuntimeJob).
 		for p := range progress {
 			wailsRuntime.EventsEmit(a.ctx, "clone:progress", map[string]interface{}{
 				"percent": p.Percent,
 				"message": p.Message,
 			})
 		}
+
+		if err := <-errCh; err != nil {
+			wailsRuntime.EventsEmit(a.ctx, "clone:error", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+		wailsRuntime.EventsEmit(a.ctx, "clone:complete", map[string]interface{}{
+			"name": actualName,
+			"path": filepath.Join(parentDir, actualName),
+		})
 	}()
 
 	return nil

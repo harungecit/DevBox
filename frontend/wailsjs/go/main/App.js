@@ -250,6 +250,14 @@ export function HideToTray() {
   return window['go']['main']['App']['HideToTray']();
 }
 
+export function ImportExternalRuntime(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ImportExternalRuntime'](arg1, arg2, arg3);
+}
+
+export function ImportExternalService(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ImportExternalService'](arg1, arg2, arg3);
+}
+
 export function InstallAdminer() {
   return window['go']['main']['App']['InstallAdminer']();
 }
@@ -424,6 +432,10 @@ export function RestartService(arg1) {
 
 export function ScaffoldNewProject(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['ScaffoldNewProject'](arg1, arg2, arg3, arg4);
+}
+
+export function ScanExternalSoftware(arg1) {
+  return window['go']['main']['App']['ScanExternalSoftware'](arg1);
 }
 
 export function SelectParentFolder() {
