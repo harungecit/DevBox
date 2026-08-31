@@ -193,14 +193,40 @@ func DownloadAndInstall(progress func(percent int, msg string)) (string, error) 
 		// elevation; a plain exec would fail with ERROR_ELEVATION_REQUIRED.
 		// /S = silent: the installer closes the running DevBox itself, copies
 		// the files and relaunches DevBox as the normal user when done.
-		if err := platform.LaunchInstaller(dest, "/S"); err != nil {
+		//
+		// We WAIT on the installer instead of quitting blindly: on success it
+		// kills this process mid-wait (we never return); if it fails — file
+		// still locked, aborted by antivirus, wrong target — it exits while
+		// DevBox is still alive and the error is surfaced to the user instead
+		// of the update silently vanishing.
+		code, err := platform.LaunchInstallerWait(dest, installerArgs()...)
+		if err != nil {
 			return dest, fmt.Errorf("could not launch installer: %w", err)
+		}
+		if code != 0 {
+			return dest, fmt.Errorf("installer exited with code %d before completing — see %%TEMP%%\\DevBox-update.log (in the elevating admin account's TEMP) for details", code)
 		}
 		return dest, nil
 	}
 	// macOS: reveal the download; installing a .dmg/.zip is a manual drag-drop.
 	platform.OpenFolder(filepath.Dir(dest))
 	return dest, nil
+}
+
+// installerArgs builds the silent-install arguments. When the running DevBox
+// is an installed copy (its directory holds uninstall.exe), the update is
+// pointed at that same directory with /D= so custom install locations keep
+// working. NSIS requires /D= to be the last argument and unquoted, even when
+// the path contains spaces.
+func installerArgs() []string {
+	args := []string{"/S"}
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		if _, err := os.Stat(filepath.Join(dir, "uninstall.exe")); err == nil {
+			args = append(args, "/D="+dir)
+		}
+	}
+	return args
 }
 
 // compareSemver compares "1.2.3" style versions; pre-release suffixes sort lower.

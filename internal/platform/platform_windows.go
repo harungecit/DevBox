@@ -321,6 +321,52 @@ func (w *windowsPlatform) LaunchInstaller(path string, args ...string) error {
 	return nil
 }
 
+// LaunchInstallerWait launches an installer elevated (like LaunchInstaller)
+// and waits for it to exit, returning its exit code. A successful silent
+// in-app update kills this process during the wait, so returning at all
+// means the installer finished while DevBox is still alive.
+func (w *windowsPlatform) LaunchInstallerWait(path string, args ...string) (uint32, error) {
+	verb, _ := syscall.UTF16PtrFromString("runas")
+	file, _ := syscall.UTF16PtrFromString(path)
+	dir, _ := syscall.UTF16PtrFromString(filepath.Dir(path))
+	params, _ := syscall.UTF16PtrFromString(strings.Join(args, " "))
+	sei := shellExecuteInfo{
+		fMask:        seeMaskNoCloseProcess,
+		lpVerb:       verb,
+		lpFile:       file,
+		lpParameters: params,
+		lpDirectory:  dir,
+		nShow:        swShowNormal,
+	}
+	sei.cbSize = uint32(unsafe.Sizeof(sei))
+	ret, _, lastErr := procShellExecuteExW.Call(uintptr(unsafe.Pointer(&sei)))
+	if ret == 0 {
+		return 0, fmt.Errorf("installer was not started (UAC prompt declined or launch failed): %v", lastErr)
+	}
+	if sei.hProcess == 0 {
+		// No handle to wait on — behave like the fire-and-forget variant.
+		return 0, nil
+	}
+	handle := syscall.Handle(sei.hProcess)
+	defer syscall.CloseHandle(handle)
+
+	// A silent update finishes in seconds; ten minutes covers a WebView2
+	// bootstrap on a slow connection. Beyond that, report it as stuck.
+	const waitTimeout = 10 * 60 * 1000
+	ev, err := syscall.WaitForSingleObject(handle, waitTimeout)
+	if err != nil {
+		return 0, fmt.Errorf("waiting for installer failed: %w", err)
+	}
+	if ev == uint32(syscall.WAIT_TIMEOUT) {
+		return 0, fmt.Errorf("installer is still running after 10 minutes")
+	}
+	var code uint32
+	if err := syscall.GetExitCodeProcess(handle, &code); err != nil {
+		return 0, fmt.Errorf("could not read installer exit code: %w", err)
+	}
+	return code, nil
+}
+
 // --- Autostart ---
 
 const (

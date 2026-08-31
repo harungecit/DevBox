@@ -14,6 +14,12 @@ type Platform interface {
 	// (Windows: ShellExecuteEx with UAC elevation, so an admin installer is
 	// not rejected with ERROR_ELEVATION_REQUIRED; macOS: open).
 	LaunchInstaller(path string, args ...string) error
+	// LaunchInstallerWait starts an installer like LaunchInstaller and waits
+	// for it to finish, returning its exit code. During a successful silent
+	// in-app update the installer kills this process mid-wait — so a return
+	// means the installer finished while we are still alive: exit code 0 =
+	// done (caller should quit), anything else = a failure to surface.
+	LaunchInstallerWait(path string, args ...string) (uint32, error)
 
 	// PATH management
 	GetUserPATH() ([]string, error)
@@ -66,6 +72,9 @@ func IsProcessRunning(pid int) bool                   { return current.IsProcess
 func KillProcessTree(pid int) error                   { return current.KillProcessTree(pid) }
 func LaunchInstaller(path string, args ...string) error {
 	return current.LaunchInstaller(path, args...)
+}
+func LaunchInstallerWait(path string, args ...string) (uint32, error) {
+	return current.LaunchInstallerWait(path, args...)
 }
 func OpenFolder(p string) error                       { return current.OpenFolder(p) }
 func OpenFile(p string) error                         { return current.OpenFile(p) }

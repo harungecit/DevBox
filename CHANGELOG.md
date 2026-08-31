@@ -3,6 +3,17 @@
 All notable changes to DevBox are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [0.4.1] — 2026-08-31
+
+### Fixed
+- **In-app update could vanish without a trace.** The silent updater quit DevBox blindly 1.5 s after launching the installer; if the installer then failed on that machine (antivirus holding the executable, `taskkill` blocked, custom install directory), nothing was ever shown — "UAC appeared, DevBox closed, and that was it". Now:
+  - DevBox **waits on the installer** and, if it exits without completing, stays open and shows the failure with its exit code.
+  - The installer writes a step-by-step log to `%TEMP%\DevBox-update.log` (in the elevating admin's TEMP), so a failed update finally leaves evidence.
+  - An update that cannot close DevBox **aborts cleanly** (exit code 5) instead of continuing into a broken half-install.
+  - The install directory is remembered (`InstallLocation` + `InstallDirRegKey`) and the updater passes `/D=` with its own location — **custom install directories now update in place** instead of installing a second copy to Program Files.
+  - App relaunch after a silent update falls back to a direct start if the `explorer.exe` handoff fails.
+- Users on **0.4.0 or older** still carry the old updater — this version needs to be installed manually once; updates after that are covered.
+
 ## [0.4.0] — 2026-08-31
 
 ### Added

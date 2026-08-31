@@ -76,17 +76,34 @@ ManifestDPIAware true
 Name "${INFO_PRODUCTNAME}"
 OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the installer's file.
 InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}" # Default installing folder ($PROGRAMFILES is Program Files folder).
+# Upgrades land on the existing installation, wherever it was installed to.
+# (The section below writes InstallLocation on every install.)
+InstallDirRegKey HKLM "${UNINST_KEY}" "InstallLocation"
 ShowInstDetails show # This will always show the installation details.
+
+; Append one line to %TEMP%\DevBox-update.log. Silent (in-app) updates are
+; otherwise invisible — when something goes wrong on a user machine this log
+; is the only evidence. The elevated installer writes to the admin's TEMP.
+!macro Log Text
+    FileOpen $R9 "$TEMP\DevBox-update.log" a
+    FileSeek $R9 0 END
+    FileWrite $R9 "${Text}$\r$\n"
+    FileClose $R9
+!macroend
 
 Function .onInit
    !insertmacro wails.checkArchitecture
+   !insertmacro Log "---- DevBox ${INFO_PRODUCTVERSION} installer started ----"
 FunctionEnd
 
 ; Close a running DevBox before touching its files (in-app update, or the
-; user forgot to quit). Waits until the executable can be written.
+; user forgot to quit). Waits until the executable can be written; if it
+; stays locked (antivirus holding it, taskkill blocked) the install ABORTS
+; with a distinct exit code instead of continuing into a broken half-install.
 Function CloseRunningApp
     nsExec::ExecToLog 'taskkill /IM "${PRODUCT_EXECUTABLE}" /T /F'
     Pop $0
+    !insertmacro Log "taskkill ${PRODUCT_EXECUTABLE} -> rc=$0"
     IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 done
     StrCpy $0 0
     retry:
@@ -94,27 +111,45 @@ Function CloseRunningApp
         FileOpen $1 "$INSTDIR\${PRODUCT_EXECUTABLE}" a
         IfErrors 0 opened
         IntOp $0 $0 + 1
-        IntCmp $0 30 done          ; ~15 s, then let the normal error surface
+        IntCmp $0 30 locked        ; ~15 s
         Sleep 500
         Goto retry
+    locked:
+        !insertmacro Log "ERROR: $INSTDIR\${PRODUCT_EXECUTABLE} still locked after 15s - aborting"
+        SetErrorLevel 5
+        Abort "DevBox could not be closed - its executable is still locked."
     opened:
         FileClose $1
+        !insertmacro Log "app closed, executable is writable"
     done:
 FunctionEnd
 
 ; Relaunch DevBox as the logged-in user (via explorer, not elevated) — used
 ; by the finish page and automatically after a silent (in-app) update.
 Function LaunchApp
+    !insertmacro Log "relaunching $INSTDIR\${PRODUCT_EXECUTABLE}"
+    ClearErrors
     Exec '"$WINDIR\explorer.exe" "$INSTDIR\${PRODUCT_EXECUTABLE}"'
+    IfErrors 0 launched
+    !insertmacro Log "explorer relaunch failed - starting directly"
+    Exec '"$INSTDIR\${PRODUCT_EXECUTABLE}"'
+    launched:
 FunctionEnd
 
 Function .onInstSuccess
+    !insertmacro Log "install SUCCEEDED into $INSTDIR"
     IfSilent 0 +2
         Call LaunchApp
 FunctionEnd
 
+Function .onInstFailed
+    !insertmacro Log "install FAILED (INSTDIR=$INSTDIR)"
+FunctionEnd
+
 Section
     !insertmacro wails.setShellContext
+
+    !insertmacro Log "installing to $INSTDIR"
 
     Call CloseRunningApp
 
@@ -124,6 +159,8 @@ Section
 
     !insertmacro wails.files
 
+    !insertmacro Log "files extracted"
+
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
 
@@ -131,6 +168,10 @@ Section
     !insertmacro wails.associateCustomProtocols
 
     !insertmacro wails.writeUninstaller
+
+    ; Remember where this install lives so the next (silent) upgrade targets
+    ; the same directory even for custom install locations.
+    WriteRegStr HKLM "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
 SectionEnd
 
 Section "uninstall"

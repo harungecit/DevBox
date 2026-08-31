@@ -1624,8 +1624,12 @@ func (a *App) GetLastUpdateCheck() updater.Release {
 	return updater.Last()
 }
 
-// InstallAppUpdate downloads the installer and launches it, then quits DevBox.
-// Events: appupdate:progress {percent,message}, appupdate:error {error}.
+// InstallAppUpdate downloads the installer and runs it silently. On Windows
+// the call waits on the installer: a successful update kills DevBox from the
+// installer side (this goroutine never resumes); an installer failure returns
+// here with DevBox still running so the error is SHOWN instead of the update
+// silently vanishing. Events: appupdate:progress {percent,message},
+// appupdate:error {error}.
 func (a *App) InstallAppUpdate() error {
 	go func() {
 		_, err := updater.DownloadAndInstall(func(pct int, msg string) {
@@ -1636,6 +1640,9 @@ func (a *App) InstallAppUpdate() error {
 			return
 		}
 		if goruntime.GOOS == "windows" {
+			// Reaching here means the installer finished (exit 0) while we
+			// are still alive — its taskkill missed us (renamed/portable
+			// executable). Quit so the updated copy can start cleanly.
 			time.Sleep(1500 * time.Millisecond)
 			a.quit()
 		}

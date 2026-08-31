@@ -181,6 +181,12 @@ func (d *darwinPlatform) LaunchInstaller(path string, args ...string) error {
 	return exec.Command("open", path).Start()
 }
 
+// LaunchInstallerWait on macOS just opens the package (installing a .dmg is
+// a manual step); there is no meaningful exit code to wait for.
+func (d *darwinPlatform) LaunchInstallerWait(path string, args ...string) (uint32, error) {
+	return 0, d.LaunchInstaller(path, args...)
+}
+
 func (d *darwinPlatform) IsProcessRunning(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil
