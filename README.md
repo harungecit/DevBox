@@ -17,6 +17,7 @@ Runtimes · databases · web servers · <code>.test</code> domains · SSL · pub
   <a href="https://devbox.harungecit.dev/">Website</a> ·
   <a href="#getting-started">Getting started</a> ·
   <a href="#what-you-get">What you get</a> ·
+  <a href="#supported-stack">Supported stack</a> ·
   <a href="#faq">FAQ</a>
 </p>
 
@@ -28,7 +29,7 @@ DevBox is a free, open-source desktop app that sets up and runs a complete local
 
 Everything DevBox installs is the **real, native software** — official builds of the runtimes and services, running directly on your machine as normal processes. There is no Docker, no virtual machine, no wrapper layer. Your projects run exactly as they would in production, only faster to set up.
 
-- **Runtimes:** Go · Node.js · PHP · Python · Rust — any version, several side by side
+- **Runtimes:** Go · Node.js · PHP · Python · Rust built in — plus Java, .NET, Ruby, Deno, Bun, Dart, Flutter, Kotlin, Zig, Elixir, Crystal and 20+ more through [vfox](https://vfox.dev) plugins — any version, several side by side
 - **Web servers:** Nginx · Apache · Caddy · FrankenPHP
 - **Databases & caches:** PostgreSQL · MySQL · MariaDB · MongoDB · Redis · Valkey
 - **Tools:** Mailpit (catch outgoing mail), Adminer, Redis Commander and mongo-express (database UIs), Composer, npm/yarn/pnpm/Bun, uv/pipx/Poetry, air/golangci-lint/gopls, cargo-watch/cargo-edit/cargo-audit, mkcert, cloudflared
@@ -72,8 +73,8 @@ Full walkthrough with screenshots: <https://devbox.harungecit.dev/#usage>
 - Imported services run with DevBox's own configuration and a fresh data directory on a free port; the original installation and its data stay untouched.
 
 ### Projects
-- **Import** any folder, **scaffold** from a template (Laravel, Symfony, WordPress, CodeIgniter, Slim, CakePHP, Yii, Next.js, Nuxt, NestJS, Astro, SvelteKit, Vue, React, Svelte, Angular, Express, Django, Flask, FastAPI, Go, Gin, Rust, static…), or **clone** a repository.
-- Framework auto-detection for 40+ frameworks — Laravel, Lumen, Symfony, CodeIgniter, Yii, CakePHP, Slim, Laminas, Drupal, WordPress, Joomla, Magento, PrestaShop, Next.js, Nuxt, NestJS, Astro, Remix, SvelteKit, Angular, Gatsby, Vue, React, Svelte, AdonisJS, Express, Fastify, Koa, Hono, Django, Flask, FastAPI, Goravel, Gin, Fiber, Echo, Actix, Axum, Rocket… — including each one's document root and dev-server command.
+- **Import** any folder, **scaffold** from a template (Laravel, Symfony, WordPress, CodeIgniter, Slim, CakePHP, Yii, Next.js, Nuxt, NestJS, Astro, SvelteKit, Vue, React, Svelte, Angular, Express, Django, Flask, FastAPI, Go, Gin, Rust, Kemal, static…), or **clone** a repository.
+- Framework auto-detection for 45+ frameworks — the full list with links is in [Supported stack](#supported-stack) — including each one's document root and dev-server command. Frameworks on plugin runtimes (Kemal on Crystal…) are recognised too; their templates unlock once the plugin is installed.
 - Every project gets a **`.test` domain** (hosts file handled for you), a **trusted local certificate** via mkcert, and the right vhost for your chosen web server — nginx, Apache, Caddy or FrankenPHP.
 - App-server frameworks (Next.js, Nuxt, Vite, Django, Go…) get a start/stop button with live logs, and the built-in front-door proxy routes their `.test` domain to the dev server.
 - Pick the runtime version and web server per project; the PHP FastCGI instance and vhost are wired up automatically.
@@ -90,11 +91,46 @@ Full walkthrough with screenshots: <https://devbox.harungecit.dev/#usage>
 - In-app update check — new DevBox versions install from **Settings** in one click.
 - Elevation (UAC) is asked only when strictly needed: writing the hosts file and binding port 80.
 
+## Supported stack
+
+Everything below installs from inside DevBox. ✚ marks frameworks with a **New project** template; the rest are recognised on import/clone.
+
+### Languages & runtimes
+
+| | |
+|---|---|
+| **Built in** | [Go](https://go.dev) · [Node.js](https://nodejs.org) · [PHP](https://www.php.net) · [Python](https://www.python.org) · [Rust](https://www.rust-lang.org) |
+| **Languages via [vfox](https://vfox.dev) plugins** | [Java](https://openjdk.org) (Temurin, Zulu, Corretto, GraalVM, Liberica and more) · [.NET](https://dotnet.microsoft.com) · [Ruby](https://www.ruby-lang.org) · [Deno](https://deno.com) · [Bun](https://bun.sh) · [Dart](https://dart.dev) · [Flutter](https://flutter.dev) · [Kotlin](https://kotlinlang.org) · [Scala](https://www.scala-lang.org) · [Groovy](https://groovy.apache.org) · [Grails](https://grails.org) · [Elixir](https://elixir-lang.org) · [Erlang/OTP](https://www.erlang.org) · [Julia](https://julialang.org) · [Crystal](https://crystal-lang.org) · [Zig](https://ziglang.org) · [V](https://vlang.io) · [Lua](https://www.lua.org) · [Typst](https://typst.app) |
+| **Build & infra tools via plugins** | [Gradle](https://gradle.org) · [Maven](https://maven.apache.org) · [CMake](https://cmake.org) · [Make](https://www.gnu.org/software/make/) · [Ninja](https://ninja-build.org) · [Clang](https://clang.llvm.org) · [Arm GNU Toolchain](https://developer.arm.com/Tools%20and%20Software/GNU%20Toolchain) · [Protobuf](https://protobuf.dev) · [Terraform](https://www.terraform.io) · [kubectl](https://kubernetes.io/docs/reference/kubectl/) · [Vagrant](https://www.vagrantup.com) · [Tomcat](https://tomcat.apache.org) · [etcd](https://etcd.io) · [MongoDB Shell & Server](https://www.mongodb.com) |
+
+Plugins are open-source Lua scripts from the [vfox registry](https://github.com/version-fox/vfox-plugins); DevBox runs them itself, so the same install / pin / global workflow applies and variables such as `JAVA_HOME` are set for you. Anything new in the registry shows up in **Runtimes → Add runtime** without a DevBox update.
+
+### Frameworks
+
+| Runtime | Recognised frameworks |
+|---|---|
+| **PHP** | [Laravel](https://laravel.com) ✚ · [Lumen](https://lumen.laravel.com) · [Symfony](https://symfony.com) ✚ · [WordPress](https://wordpress.org) ✚ · [CodeIgniter](https://codeigniter.com) ✚ · [Yii](https://www.yiiframework.com) ✚ · [CakePHP](https://cakephp.org) ✚ · [Slim](https://www.slimframework.com) ✚ · [Laminas](https://getlaminas.org) · [Drupal](https://www.drupal.org) · [Joomla](https://www.joomla.org) · [Magento](https://github.com/magento/magento2) · [PrestaShop](https://prestashop.com) · plain PHP ✚ |
+| **Node.js** | [Next.js](https://nextjs.org) ✚ · [Nuxt](https://nuxt.com) ✚ · [NestJS](https://nestjs.com) ✚ · [Astro](https://astro.build) ✚ · [Remix](https://remix.run) · [SvelteKit](https://svelte.dev/docs/kit) ✚ · [Angular](https://angular.dev) ✚ · [Gatsby](https://www.gatsbyjs.com) · [Vue](https://vuejs.org) ✚ · [React](https://react.dev) ✚ · [Svelte](https://svelte.dev) ✚ · [AdonisJS](https://adonisjs.com) · [Express](https://expressjs.com) ✚ · [Fastify](https://fastify.dev) · [Koa](https://koajs.com) · [Hono](https://hono.dev) · [Vite](https://vite.dev) · plain Node |
+| **Python** | [Django](https://www.djangoproject.com) ✚ · [FastAPI](https://fastapi.tiangolo.com) ✚ · [Flask](https://flask.palletsprojects.com) ✚ · plain Python |
+| **Go** | [Goravel](https://www.goravel.dev) · [Gin](https://gin-gonic.com) ✚ · [Fiber](https://gofiber.io) · [Echo](https://echo.labstack.com) · plain Go ✚ |
+| **Rust** | [Actix](https://actix.rs) · [Axum](https://github.com/tokio-rs/axum) · [Rocket](https://rocket.rs) · plain Rust ✚ |
+| **Crystal** (plugin) | [Kemal](https://kemalcr.com) ✚ · plain Crystal |
+| **Static** | Plain HTML ✚ |
+
+### Services
+
+[Nginx](https://nginx.org) · [Apache](https://httpd.apache.org) · [Caddy](https://caddyserver.com) · [FrankenPHP](https://frankenphp.dev) · [PostgreSQL](https://www.postgresql.org) · [MySQL](https://www.mysql.com) · [MariaDB](https://mariadb.org) · [MongoDB](https://www.mongodb.com) · [Redis](https://redis.io) · [Valkey](https://valkey.io) (macOS; no Windows build upstream — Redis is API-compatible) · [Mailpit](https://mailpit.axllent.org)
+
+### Tools
+
+[Composer](https://getcomposer.org) · npm / [yarn](https://yarnpkg.com) / [pnpm](https://pnpm.io) / [Bun](https://bun.sh) · [uv](https://docs.astral.sh/uv/) · [pipx](https://pipx.pypa.io) · [Poetry](https://python-poetry.org) · [air](https://github.com/air-verse/air) · [golangci-lint](https://golangci-lint.run) · [gopls](https://pkg.go.dev/golang.org/x/tools/gopls) · [cargo-watch](https://github.com/watchexec/cargo-watch) · [cargo-edit](https://github.com/killercup/cargo-edit) · [cargo-audit](https://github.com/rustsec/rustsec) · [Adminer](https://www.adminer.org) · [Redis Commander](https://github.com/joeferner/redis-commander) · [mongo-express](https://github.com/mongo-express/mongo-express) · [mkcert](https://github.com/FiloSottile/mkcert) · [cloudflared](https://github.com/cloudflare/cloudflared)
+
 ## Where things live
 
 ```
 C:\DevBox\
-├─ runtimes\{go,node,php,python,rust}\<version>\
+├─ runtimes\{go,node,php,python,rust,java,...}\<version>\
+├─ plugins\{java,ruby,...}\                    # vfox plugins that manage the extra runtimes
 ├─ services\{nginx,postgres,mysql,...}\        # binaries, data, logs, generated configs
 ├─ projects\                                   # default home for scaffolded / cloned projects
 ├─ tools\{bun,mkcert,cloudflared,...}\
