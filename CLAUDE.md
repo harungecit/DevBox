@@ -40,7 +40,7 @@ GOOS=darwin go build ./...   # Cross-check macOS build from Windows (and vice ve
 - **`main.go`** — Only contains the `//go:embed all:frontend/dist` declaration. Shared by all OSes.
 - **`main_windows.go` / `main_darwin.go`** — Build-tagged entry points. Each defines `func main()` with OS-specific Wails options (Windows: `windows.Options{Theme: Dark}`; macOS: `mac.Options{TitleBar: HiddenInset}`). Adding a third OS = add another `main_<os>.go`.
 - **`app.go`** — Central `App` struct: the **only** Wails-bound struct, so all IPC methods live here. Startup initializes config → i18n → runtime managers → service managers → vhost regeneration → auto-start services.
-- **`internal/platform/`** — **OS abstraction layer.** Defines the `Platform` interface (process attrs, PATH management, hosts file with elevation, autostart, open folder/file, binary/script naming, lib extension). `platform_windows.go` and `platform_darwin.go` each have `init()` that sets `current`. Package-level convenience functions (`platform.SetProcessAttrs`, `platform.AddToPath`, etc.) delegate to `current`. **Any new code that touches OS-specific behavior must go through this interface, not raw `syscall` / registry / `os/exec` shell calls.**
+- **`internal/platform/`** — **OS abstraction layer.** Defines the `Platform` interface (process attrs, PATH management, hosts file with elevation, autostart, open folder/file, binary/script naming, lib extension). `platform_windows.go` and `platform_unix.go` each have `init()` that sets `current`. Package-level convenience functions (`platform.SetProcessAttrs`, `platform.AddToPath`, etc.) delegate to `current`. **Any new code that touches OS-specific behavior must go through this interface, not raw `syscall` / registry / `os/exec` shell calls.**
 - **`internal/runtime/`** — Runtime version managers. Each implements `RuntimeManager` interface, registered in `manager.go:InitAll()`. Installs to `~/.devbox/runtimes/{name}/{version}/`.
 - **`internal/service/`** — Service managers. Each implements `ServiceManager` interface, registered in `manager.go:InitAll()`. Installs to `~/.devbox/services/{name}/`. Only web servers form a **conflict group** (nginx/apache/caddy — vhost generation assumes a single active web server); databases and caches (MySQL + MariaDB, Redis + Valkey) can be installed side by side on different ports — install/import auto-picks a free port.
 - **`internal/project/`** — Project management: scaffold, clone, domain/hosts, vhost generation, dev servers, SSL via mkcert, Cloudflare tunnels.
@@ -126,7 +126,7 @@ Two languages: English (`en`) and Turkish (`tr`). Backend embeds JSON from `inte
 
 ## Platform-Specific Details
 
-All listed here is encapsulated in `internal/platform/` — touching it usually means editing both `platform_windows.go` and `platform_darwin.go`.
+All listed here is encapsulated in `internal/platform/` — touching it usually means editing both `platform_windows.go` and `platform_unix.go`.
 
 **Windows**
 - PATH stored in registry `HKCU\Environment\Path`, broadcast via `WM_SETTINGCHANGE` (`SendMessageTimeoutW`)
