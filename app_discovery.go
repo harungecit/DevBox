@@ -104,8 +104,9 @@ func (a *App) ImportExternalRuntime(name, path, version string) error {
 		// the global one and lands on PATH.
 		global, _ := mgr.GetGlobal()
 		if global == "" {
-			mgr.SetGlobal(version)
-			pathenv.AddToPath(mgr.BinaryPath(version))
+			if err := mgr.SetGlobal(version); err == nil {
+				a.activateRuntimeEnv(mgr, "", version)
+			}
 		}
 		invalidateDiscoveryCache()
 		return map[string]interface{}{"imported": true}

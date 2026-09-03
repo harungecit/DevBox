@@ -26,6 +26,22 @@ export namespace config {
 	        this.tunnelToken = source["tunnelToken"];
 	    }
 	}
+	export class ManagedEnvEntry {
+	    value: string;
+	    runtime: string;
+	    version: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ManagedEnvEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.value = source["value"];
+	        this.runtime = source["runtime"];
+	        this.version = source["version"];
+	    }
+	}
 	export class Config {
 	    language: string;
 	    theme: string;
@@ -40,6 +56,8 @@ export namespace config {
 	    versionCacheHours: number;
 	    phpCgiPorts: Record<string, number>;
 	    cloudflare: CloudflareConfig;
+	    pluginRegistry?: string;
+	    managedEnv: Record<string, ManagedEnvEntry>;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -60,6 +78,8 @@ export namespace config {
 	        this.versionCacheHours = source["versionCacheHours"];
 	        this.phpCgiPorts = source["phpCgiPorts"];
 	        this.cloudflare = this.convertValues(source["cloudflare"], CloudflareConfig);
+	        this.pluginRegistry = source["pluginRegistry"];
+	        this.managedEnv = this.convertValues(source["managedEnv"], ManagedEnvEntry, true);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -223,6 +243,24 @@ export namespace main {
 	        this.key = source["key"];
 	    }
 	}
+	export class ManagedEnvVar {
+	    key: string;
+	    value: string;
+	    runtime: string;
+	    version: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ManagedEnvVar(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.value = source["value"];
+	        this.runtime = source["runtime"];
+	        this.version = source["version"];
+	    }
+	}
 	export class MigrationNotice {
 	    migrated: boolean;
 	    from: string;
@@ -257,6 +295,38 @@ export namespace main {
 	        this.enabled = source["enabled"];
 	        this.port = source["port"];
 	        this.httpsPort = source["httpsPort"];
+	    }
+	}
+	export class RegistryEntry {
+	    name: string;
+	    displayName: string;
+	    desc: string;
+	    homepage: string;
+	    kind: string;
+	    installed: boolean;
+	    installedVersion: string;
+	    updateAvailable: string;
+	    builtIn: boolean;
+	    builtInAs: string;
+	    thirdParty: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new RegistryEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.displayName = source["displayName"];
+	        this.desc = source["desc"];
+	        this.homepage = source["homepage"];
+	        this.kind = source["kind"];
+	        this.installed = source["installed"];
+	        this.installedVersion = source["installedVersion"];
+	        this.updateAvailable = source["updateAvailable"];
+	        this.builtIn = source["builtIn"];
+	        this.builtInAs = source["builtInAs"];
+	        this.thirdParty = source["thirdParty"];
 	    }
 	}
 	export class RuntimeVersionInfo {
@@ -313,6 +383,46 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class RuntimeMeta {
+	    name: string;
+	    displayName: string;
+	    builtIn: boolean;
+	    plugin: boolean;
+	    kind: string;
+	    description: string;
+	    homepage: string;
+	    license: string;
+	    pluginVersion: string;
+	    pluginUpdate: string;
+	    thirdParty: boolean;
+	    notes: string[];
+	    installed: number;
+	    global: string;
+	    envVars: Record<string, string>;
+	
+	    static createFrom(source: any = {}) {
+	        return new RuntimeMeta(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.displayName = source["displayName"];
+	        this.builtIn = source["builtIn"];
+	        this.plugin = source["plugin"];
+	        this.kind = source["kind"];
+	        this.description = source["description"];
+	        this.homepage = source["homepage"];
+	        this.license = source["license"];
+	        this.pluginVersion = source["pluginVersion"];
+	        this.pluginUpdate = source["pluginUpdate"];
+	        this.thirdParty = source["thirdParty"];
+	        this.notes = source["notes"];
+	        this.installed = source["installed"];
+	        this.global = source["global"];
+	        this.envVars = source["envVars"];
+	    }
+	}
 	
 	export class WebLinkEntry {
 	    label: string;
@@ -342,6 +452,40 @@ export namespace main {
 	        this.configFiles = this.convertValues(source["configFiles"], ConfigFileEntry);
 	        this.connectionInfo = this.convertValues(source["connectionInfo"], ConnectionEntry);
 	        this.webLinks = this.convertValues(source["webLinks"], WebLinkEntry);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class VfoxRegistryResult {
+	    entries: RegistryEntry[];
+	    fetchedAt: string;
+	    registry: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new VfoxRegistryResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.entries = this.convertValues(source["entries"], RegistryEntry);
+	        this.fetchedAt = source["fetchedAt"];
+	        this.registry = source["registry"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -725,6 +869,41 @@ export namespace updater {
 	        this.publishedAt = source["publishedAt"];
 	        this.checkedAt = source["checkedAt"];
 	        this.error = source["error"];
+	    }
+	}
+
+}
+
+export namespace vfox {
+	
+	export class Manifest {
+	    name: string;
+	    version: string;
+	    description: string;
+	    homepage: string;
+	    license: string;
+	    downloadUrl: string;
+	    minRuntimeVersion: string;
+	    manifestUrl: string;
+	    notes: string[];
+	    legacyFilenames: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Manifest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.version = source["version"];
+	        this.description = source["description"];
+	        this.homepage = source["homepage"];
+	        this.license = source["license"];
+	        this.downloadUrl = source["downloadUrl"];
+	        this.minRuntimeVersion = source["minRuntimeVersion"];
+	        this.manifestUrl = source["manifestUrl"];
+	        this.notes = source["notes"];
+	        this.legacyFilenames = source["legacyFilenames"];
 	    }
 	}
 

@@ -192,7 +192,7 @@ func CaddyfilePathExposed() string { return caddyfilePath() }
 func ResolveBackend(p project.Project) string {
 	ws := p.Webserver
 	if ws == "" || ws == "auto" {
-		ws = resolveAutoWebserver(p.Runtime)
+		ws = project.ResolveWebserver(p)
 	}
 
 	if ws == "devserver" {
@@ -208,18 +208,3 @@ func ResolveBackend(p project.Project) string {
 	return ""
 }
 
-// resolveAutoWebserver picks a sensible default for projects with Webserver=="auto"
-// or empty. App-server runtimes use their own dev server. PHP/static fall back to
-// whichever managed webserver is installed first, in preference order.
-func resolveAutoWebserver(runtime string) string {
-	switch runtime {
-	case "node", "go", "python", "rust":
-		return "devserver"
-	}
-	for _, name := range []string{"nginx", "caddy", "apache", "frankenphp"} {
-		if mgr, ok := service.Registry[name]; ok && mgr.IsInstalled() {
-			return name
-		}
-	}
-	return ""
-}

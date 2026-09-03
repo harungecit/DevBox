@@ -51,12 +51,13 @@ Full walkthrough with screenshots: <https://devbox.harungecit.dev/#usage>
 
 ## What you get
 
-### Runtimes — Go, Node.js, PHP, Python, Rust
+### Runtimes — Go, Node.js, PHP, Python, Rust… and 40+ more via plugins
 - Install any version straight from the official sources (checksums verified). Version lists are cached and refreshed quietly in the background.
 - Keep as many versions as you like. One is **global** (on your PATH); any project can be **pinned** to another one.
 - Each PHP version gets its own FastCGI process, so a Laravel app on PHP 8.4 and a legacy app on 7.4 can run at the same time.
 - **Batteries included:** PHP ships with a dev-tuned `php.ini` and common extensions enabled; Xdebug, Redis, Imagick, MongoDB and other PECL extensions are one click away. Composer, Bun, yarn and pnpm are installed for you.
 - Minor/patch releases **update in place** — your `php.ini`, Composer, global npm and pip packages carry over.
+- **More languages via plugins:** Java, .NET, Ruby, Deno, Bun, Dart, Flutter, Kotlin, Zig, Elixir, Erlang, Julia, Gradle, Maven, Terraform, kubectl and dozens more through the [vfox](https://vfox.dev) plugin registry — same install / pin / global workflow, and `JAVA_HOME`-style variables are managed for you. Add them from **Runtimes → Add runtime**.
 
 ### Services — Nginx, Apache, Caddy, FrankenPHP, PostgreSQL, MySQL, MariaDB, MongoDB, Redis, Valkey, Mailpit
 - Choose a version and a port (conflicts are caught before install), then start, stop, restart, view logs and copy connection details — all from the UI.
@@ -128,7 +129,7 @@ Bug reports, feature ideas and pull requests are welcome — open an [issue](htt
 
 ## Acknowledgements
 
-DevBox stands on the shoulders of great open-source projects: [Wails](https://wails.io), [Svelte](https://svelte.dev), [Caddy](https://caddyserver.com), [FrankenPHP](https://frankenphp.dev), [mkcert](https://github.com/FiloSottile/mkcert), [cloudflared](https://github.com/cloudflare/cloudflared), [Mailpit](https://mailpit.axllent.org), [Adminer](https://www.adminer.org), the PHP for Windows team, and every runtime, web server and database it installs for you. Thank you.
+DevBox stands on the shoulders of great open-source projects: [Wails](https://wails.io), [Svelte](https://svelte.dev), [vfox](https://vfox.dev) and its plugin authors, [Caddy](https://caddyserver.com), [FrankenPHP](https://frankenphp.dev), [mkcert](https://github.com/FiloSottile/mkcert), [cloudflared](https://github.com/cloudflare/cloudflared), [Mailpit](https://mailpit.axllent.org), [Adminer](https://www.adminer.org), the PHP for Windows team, and every runtime, web server and database it installs for you. Thank you.
 
 ## License
 

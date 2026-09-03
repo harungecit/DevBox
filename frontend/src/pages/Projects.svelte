@@ -3,6 +3,7 @@
   import ConfirmDialog from '../lib/components/ConfirmDialog.svelte';
   import { t } from '../lib/i18n/index';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
+  import { runtimeCatalog, runtimeLabel } from '../lib/stores/runtimes';
   import ProgressBar from '../lib/components/ProgressBar.svelte';
   import {
     ListProjects,
@@ -99,10 +100,10 @@
   function lockedRuntime(framework: string): string {
     return catalog[framework]?.runtime ?? frameworkRuntime[framework] ?? '';
   }
-  function runtimeChoicesFor(framework: string): { id: string; label: string }[] {
+  function runtimeChoicesFor(framework: string, choices: { id: string; label: string }[]): { id: string; label: string }[] {
     const rt = lockedRuntime(framework);
-    if (rt) return runtimeChoices.filter((c) => c.id === rt);
-    return runtimeChoices;
+    if (rt) return choices.filter((c) => c.id === rt);
+    return choices;
   }
 
   async function toggleAutoStart(proj: ProjectInfo, on: boolean) {
@@ -164,15 +165,13 @@
   let installedWebservers: Set<string> = new Set();
   let savingProjectSettings: Record<string, boolean> = {};
 
-  const runtimeChoices = [
-    { id: '', label: 'Auto (from framework)' },
-    { id: 'php', label: 'PHP' },
-    { id: 'node', label: 'Node.js' },
-    { id: 'go', label: 'Go' },
-    { id: 'python', label: 'Python' },
-    { id: 'rust', label: 'Rust' },
+  // Runtime choices come from the catalog (built-ins + plugin languages;
+  // tool plugins such as kubectl are not project runtimes).
+  $: runtimeChoices = [
+    { id: '', label: $t('projects.runtimeAuto') },
+    ...$runtimeCatalog.filter((m) => m.kind !== 'tool').map((m) => ({ id: m.name, label: m.displayName })),
     { id: 'static', label: 'Static' },
-  ];
+  ] as { id: string; label: string }[];
 
   // webserverChoicesFor returns the list of allowed webservers given a runtime.
   // App-server runtimes can only use their own dev server; PHP/Static can pick
@@ -180,7 +179,9 @@
   // `installed` is passed in (not read from module scope) so Svelte re-evaluates
   // the {@const} in the template once the async service list arrives.
   function webserverChoicesFor(rt: string, installed: Set<string>, current: string): { id: string; label: string }[] {
-    const isAppServer = rt === 'node' || rt === 'go' || rt === 'python' || rt === 'rust';
+    // Anything that is not PHP/static serves itself (built-in app-server
+    // runtimes and plugin runtimes alike).
+    const isAppServer = rt !== '' && rt !== 'php' && rt !== 'static';
     if (isAppServer) {
       return [{ id: 'devserver', label: 'Dev server (built-in)' }];
     }
@@ -466,7 +467,7 @@
 
   function templateVersionLabel(tmpl: TemplateInfo): string {
     if (!tmpl.runtimeVersion) return '';
-    const name = runtimeDisplayName[tmpl.requiredRuntime] || tmpl.requiredRuntime;
+    const name = runtimeDisplayName[tmpl.requiredRuntime] || $runtimeLabel(tmpl.requiredRuntime);
     return `${name} ${tmpl.runtimeVersion}`;
   }
 
@@ -1612,10 +1613,16 @@
                   disabled={savingProjectSettings[proj.name] || !!lockedRuntime(proj.framework)}
                   title={lockedRuntime(proj.framework) ? $t('projects.runtimeLocked', proj.framework) : ''}
                 >
-                  {#each runtimeChoicesFor(proj.framework) as rc}
+                  {#each runtimeChoicesFor(proj.framework, runtimeChoices) as rc}
                     <option value={rc.id} selected={currentRuntime === rc.id}>{rc.label}</option>
                   {/each}
+                  {#if currentRuntime && currentRuntime !== 'static' && !runtimeChoices.some((rc) => rc.id === currentRuntime)}
+                    <option value={currentRuntime} selected>{currentRuntime}</option>
+                  {/if}
                 </select>
+                {#if currentRuntime && currentRuntime !== 'static' && !runtimeChoices.some((rc) => rc.id === currentRuntime)}
+                  <p class="text-[10px] text-amber-500 mt-1">{$t('projects.runtimeUnmanaged', currentRuntime)}</p>
+                {/if}
               </div>
 
               <div>

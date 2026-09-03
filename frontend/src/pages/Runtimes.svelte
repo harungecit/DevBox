@@ -4,11 +4,10 @@
   import StatusBadge from '../lib/components/StatusBadge.svelte';
   import ProgressBar from '../lib/components/ProgressBar.svelte';
   import ConfirmDialog from '../lib/components/ConfirmDialog.svelte';
-  import { runtimeLogos } from '../lib/logos';
+  import { runtimeLogo } from '../lib/logos';
   import {
     GetRemoteVersionsInfo,
     GetInstalledVersions,
-    GetInstalledCounts,
     InstallRuntime,
     UpdateRuntime,
     UninstallRuntime,
@@ -27,6 +26,10 @@
     OpenFileInEditor,
   } from '../../wailsjs/go/main/App';
   import ImportCenter from '../lib/components/ImportCenter.svelte';
+  import RuntimeCatalog from '../lib/components/RuntimeCatalog.svelte';
+  import PluginRuntimeHeader from '../lib/components/PluginRuntimeHeader.svelte';
+  import { runtimeCatalog, loadRuntimeCatalog } from '../lib/stores/runtimes';
+  import type { RuntimeMeta } from '../lib/stores/runtimes';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { runtimeInstalls, startRuntimeInstall, clearRuntimeInstall } from '../lib/stores/installs';
 
@@ -97,11 +100,12 @@
 
   // Import Center modal (external installations found on this machine).
   let showImportCenter: boolean = false;
+  // Runtime catalog modal (add a language/tool from the vfox plugin registry).
+  let showRuntimeCatalog: boolean = false;
 
-  let activeTab: string = 'go';
+  let activeTab: string = '';
   let installedVersions: VersionInfo[] = [];
   let remoteVersions: VersionInfo[] = [];
-  let installedCounts: Record<string, number> = {};
   let loadingRemote: boolean = false;
   let loadingInstalled: boolean = false;
   let errorMessage: string = '';
@@ -158,20 +162,33 @@
     { key: 'date.timezone', type: 'text', suffix: '' },
   ];
 
-  const tabs = [
-    { id: 'go', label: 'Go' },
-    { id: 'node', label: 'Node.js' },
-    { id: 'php', label: 'PHP' },
-    { id: 'python', label: 'Python' },
-    { id: 'rust', label: 'Rust' },
-  ];
+  // Tabs come from the runtime catalog: built-ins first, then plugin runtimes.
+  interface Tab { id: string; label: string; plugin: boolean; count: number }
+  $: tabs = $runtimeCatalog.map((m) => ({ id: m.name, label: m.displayName, plugin: m.plugin, count: m.installed })) as Tab[];
+  $: builtinTabs = tabs.filter((tab) => !tab.plugin);
+  $: pluginTabs = tabs.filter((tab) => tab.plugin);
+  $: activeMeta = $runtimeCatalog.find((m) => m.name === activeTab) as RuntimeMeta | undefined;
+  $: activeLabel = activeMeta?.displayName ?? activeTab;
+  // Select a tab once the catalog arrives (preferring one with installed
+  // versions) and fall back when the active runtime disappears (plugin removed).
+  $: if (tabs.length > 0 && !tabs.some((tab) => tab.id === activeTab)) {
+    const first = tabs.find((tab) => tab.count > 0) ?? tabs[0];
+    switchTab(first.id);
+  }
 
-  async function loadCounts() {
-    try {
-      installedCounts = (await GetInstalledCounts()) || {};
-    } catch {
-      // non-fatal
-    }
+  // Version list filtering — plugin lists (Java, .NET…) can run into the hundreds.
+  let versionFilter: string = '';
+  let stableOnlyByTab: Record<string, boolean> = {};
+  let showAllVersions: boolean = false;
+  const VERSION_ROW_CAP = 200;
+  $: stableOnly = stableOnlyByTab[activeTab] ?? (activeMeta?.plugin === true || remoteVersions.length > 60);
+  $: visibleRemote = remoteVersions.filter((v) =>
+    (!stableOnly || v.stable || v.installed) &&
+    (!versionFilter || v.number.toLowerCase().includes(versionFilter.toLowerCase()))
+  );
+  $: cappedRemote = showAllVersions ? visibleRemote : visibleRemote.slice(0, VERSION_ROW_CAP);
+  function toggleStableOnly() {
+    stableOnlyByTab = { ...stableOnlyByTab, [activeTab]: !stableOnly };
   }
 
   async function loadInstalled() {
@@ -204,6 +221,8 @@
   async function switchTab(tab: string) {
     activeTab = tab;
     errorMessage = '';
+    versionFilter = '';
+    showAllVersions = false;
     await Promise.all([loadInstalled(), loadRemote()]);
     if (tab === 'php') {
       await loadPHPExtras();
@@ -362,7 +381,7 @@
     uninstallingVersion = version;
     try {
       await UninstallRuntime(activeTab, version);
-      await Promise.all([loadInstalled(), loadRemote(), loadCounts()]);
+      await Promise.all([loadInstalled(), loadRemote(), loadRuntimeCatalog()]);
     } catch (e) {
       errorMessage = String(e);
     }
@@ -373,7 +392,7 @@
   async function setGlobal(version: string) {
     try {
       await SetGlobalRuntime(activeTab, version);
-      await loadInstalled();
+      await Promise.all([loadInstalled(), loadRuntimeCatalog()]);
       if (activeTab === 'php') await loadPHPExtras();
     } catch (e) {
       errorMessage = String(e);
@@ -384,7 +403,6 @@
 
   onMount(() => {
     eventUnsubs.push(EventsOn('runtime:installed', (data: any) => {
-      loadCounts();
       if (data?.name === activeTab) {
         loadInstalled();
         loadRemote();
@@ -393,6 +411,9 @@
     }));
     eventUnsubs.push(EventsOn('versions:refreshed', () => {
       loadRemote();
+    }));
+    eventUnsubs.push(EventsOn('runtimes:changed', () => {
+      loadRuntimeCatalog();
     }));
     eventUnsubs.push(EventsOn('phpext:progress', (d: any) => {
       if (!d?.name) return;
@@ -407,9 +428,8 @@
       const { [d?.name]: _r, ...rest } = peclBusy; peclBusy = rest;
       errorMessage = `${d?.name}: ${d?.error || 'install failed'}`;
     }));
-    loadCounts();
-    loadInstalled();
-    loadRemote();
+    // The tab-selection reactive block loads versions once the catalog is in.
+    loadRuntimeCatalog();
   });
 
   onDestroy(() => {
@@ -424,21 +444,31 @@
       <h2 class="text-2xl font-bold">{$t('runtimes.title')}</h2>
       <p class="text-[var(--color-text-secondary)] mt-1">{$t('runtimes.subtitle')}</p>
     </div>
-    <button
-      class="text-xs px-3 py-1.5 rounded-lg font-medium border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-primary-500 hover:border-primary-500/40 transition-colors flex items-center gap-1.5 shrink-0 mt-1"
-      on:click={() => showImportCenter = true}
-      title={$t('discovery.centerTitle')}
-    >
-      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      {$t('discovery.centerButton')}
-    </button>
+    <div class="flex items-center gap-2 shrink-0 mt-1">
+      <button
+        class="text-xs px-3 py-1.5 rounded-lg font-medium border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-primary-500 hover:border-primary-500/40 transition-colors flex items-center gap-1.5"
+        on:click={() => showImportCenter = true}
+        title={$t('discovery.centerTitle')}
+      >
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        {$t('discovery.centerButton')}
+      </button>
+      <button
+        class="text-xs px-3 py-1.5 rounded-lg font-medium bg-primary-600 hover:bg-primary-700 text-white shadow-sm transition-colors flex items-center gap-1.5"
+        on:click={() => showRuntimeCatalog = true}
+        title={$t('plugins.subtitle')}
+      >
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        {$t('runtimes.addRuntime')}
+      </button>
+    </div>
   </div>
 
   <!-- Runtime Tabs -->
-  <div class="flex gap-1 border-b border-[var(--color-border)]">
-    {#each tabs as tab}
+  <div class="flex gap-1 border-b border-[var(--color-border)] overflow-x-auto">
+    {#each builtinTabs as tab (tab.id)}
       <button
-        class="px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-2"
+        class="px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-2 shrink-0"
         class:border-primary-500={activeTab === tab.id}
         class:text-primary-500={activeTab === tab.id}
         class:border-transparent={activeTab !== tab.id}
@@ -446,15 +476,47 @@
         on:click={() => switchTab(tab.id)}
         disabled={installing !== ''}
       >
-        <div class="w-5 h-5 rounded overflow-hidden">{@html runtimeLogos[tab.id] || ''}</div>
+        <div class="w-5 h-5 rounded overflow-hidden">{@html runtimeLogo(tab.id, tab.label)}</div>
         {tab.label}
-        {#if installedCounts[tab.id] > 0}
+        {#if tab.count > 0}
           <span class="min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center {activeTab === tab.id ? 'bg-primary-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-[var(--color-text-secondary)]'}">
-            {installedCounts[tab.id]}
+            {tab.count}
           </span>
         {/if}
       </button>
     {/each}
+    {#if pluginTabs.length > 0}
+      <div class="w-px h-5 bg-[var(--color-border)] self-center mx-1 shrink-0"></div>
+      {#each pluginTabs as tab (tab.id)}
+        <button
+          class="px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-2 shrink-0"
+          class:border-primary-500={activeTab === tab.id}
+          class:text-primary-500={activeTab === tab.id}
+          class:border-transparent={activeTab !== tab.id}
+          class:text-[var(--color-text-secondary)]={activeTab !== tab.id}
+          on:click={() => switchTab(tab.id)}
+          disabled={installing !== ''}
+          title={$t('runtimes.pluginTabHint')}
+        >
+          <div class="w-5 h-5 rounded overflow-hidden">{@html runtimeLogo(tab.id, tab.label)}</div>
+          {tab.label}
+          {#if tab.count > 0}
+            <span class="min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center {activeTab === tab.id ? 'bg-primary-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-[var(--color-text-secondary)]'}">
+              {tab.count}
+            </span>
+          {/if}
+        </button>
+      {/each}
+    {/if}
+    <button
+      class="px-3 py-2.5 text-xs font-medium transition-colors border-b-2 border-transparent -mb-px flex items-center gap-1.5 shrink-0 text-[var(--color-text-secondary)] hover:text-primary-500"
+      on:click={() => showRuntimeCatalog = true}
+      disabled={installing !== ''}
+      title={$t('runtimes.addRuntime')}
+    >
+      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      {$t('runtimes.addRuntime')}
+    </button>
   </div>
 
   <!-- Error message -->
@@ -469,7 +531,7 @@
   {#if currentInstall}
     {#if currentInstall.error}
       <div class="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
-        <span class="font-medium">{activeTab} {currentInstall.version}:</span>
+        <span class="font-medium">{activeLabel} {currentInstall.version}:</span>
         {currentInstall.error}
         <button class="ml-2 underline" on:click={dismissInstallError}>{$t('common.dismiss')}</button>
       </div>
@@ -477,7 +539,7 @@
       <div class="card">
         <div class="flex items-center gap-3 mb-2">
           <div class="w-2 h-2 rounded-full bg-primary-500 animate-pulse"></div>
-          <span class="text-sm font-medium">{currentInstall.importing ? $t('discovery.importing') : $t('runtimes.downloading')} {activeTab} {currentInstall.version}</span>
+          <span class="text-sm font-medium">{currentInstall.importing ? $t('discovery.importing') : $t('runtimes.downloading')} {activeLabel} {currentInstall.version}</span>
         </div>
         <ProgressBar percent={currentInstall.percent} message={currentInstall.message} />
       </div>
@@ -485,6 +547,10 @@
   {/if}
 
   <div class="space-y-6">
+    {#if activeMeta && activeMeta.plugin}
+      <PluginRuntimeHeader meta={activeMeta} busy={installing !== '' || uninstallingVersion !== null} on:removed={() => loadRuntimeCatalog()} />
+    {/if}
+
     <!-- Installed Versions -->
     <div class="card p-5">
       <div class="flex items-center justify-between mb-4">
@@ -507,7 +573,7 @@
             <div class="flex items-center justify-between p-4 rounded-xl border border-[var(--color-border)] hover:bg-[var(--color-bg)] transition-colors">
               <div class="flex items-center gap-4">
                 <div class="w-8 h-8 rounded-lg overflow-hidden shadow-sm">
-                  {@html runtimeLogos[activeTab] || ''}
+                  {@html runtimeLogo(activeTab, activeLabel)}
                 </div>
                 <span class="font-mono text-sm font-semibold">{ver.number}</span>
                 {#if ver.current}
@@ -750,8 +816,24 @@
       <div class="flex items-center justify-between mb-4">
         <h3 class="text-base font-bold flex items-center gap-2">
           {$t('runtimes.available')}
+          {#if remoteVersions.length > 0}
+            <span class="text-[10px] font-normal text-[var(--color-text-secondary)]">{$t('runtimes.showingVersions', String(visibleRemote.length), String(remoteVersions.length))}</span>
+          {/if}
         </h3>
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-3">
+          {#if remoteVersions.length > 0}
+            <input
+              type="text"
+              bind:value={versionFilter}
+              placeholder={$t('runtimes.filterVersions')}
+              class="px-2 py-1 text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] w-32 font-mono"
+            />
+            <button
+              class="text-[10px] px-2 py-1 rounded-lg border font-bold uppercase transition-colors {stableOnly ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-[var(--color-border)] text-[var(--color-text-secondary)]'}"
+              on:click={toggleStableOnly}
+              title={$t('runtimes.stableOnly')}
+            >{$t('runtimes.stableOnly')}</button>
+          {/if}
           {#if loadingRemote}
             <span class="text-xs text-[var(--color-text-secondary)] animate-pulse">{$t('common.loading')}</span>
           {:else if fetchedAt}
@@ -764,9 +846,13 @@
         </div>
       </div>
 
-      {#if remoteVersions.length > 0}
+      {#if remoteVersions.length > 0 && visibleRemote.length === 0}
+        <div class="text-center py-8 text-[var(--color-text-secondary)]">
+          <p class="text-sm">{$t('runtimes.filterNoMatch')}</p>
+        </div>
+      {:else if remoteVersions.length > 0}
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-[400px] overflow-y-auto pr-2">
-          {#each remoteVersions as ver}
+          {#each cappedRemote as ver (ver.number)}
             <div class="flex items-center justify-between p-3 rounded-lg border transition-all bg-[var(--color-bg)]/50 {ver.updateFor ? 'border-amber-500/30' : 'border-[var(--color-border)] hover:border-primary-500/30'}">
               <div class="flex flex-col gap-1 min-w-0">
                 <span class="font-mono text-xs font-bold truncate">{ver.number}</span>
@@ -813,10 +899,15 @@
             </div>
           {/each}
         </div>
+        {#if !showAllVersions && visibleRemote.length > VERSION_ROW_CAP}
+          <div class="text-center mt-3">
+            <button class="text-xs text-primary-500 hover:underline" on:click={() => showAllVersions = true}>{$t('runtimes.showAll', String(visibleRemote.length))}</button>
+          </div>
+        {/if}
       {:else if loadingRemote}
         <div class="text-center py-12">
           <div class="w-8 h-8 border-3 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p class="text-sm text-[var(--color-text-secondary)]">{$t('runtimes.loadingVersions').replace('{0}', activeTab)}</p>
+          <p class="text-sm text-[var(--color-text-secondary)]">{$t('runtimes.loadingVersions').replace('{0}', activeLabel)}</p>
         </div>
       {:else}
         <div class="text-center py-12 text-[var(--color-text-secondary)]">
@@ -828,12 +919,18 @@
 </div>
 
 <ImportCenter open={showImportCenter} on:close={() => showImportCenter = false} />
+<RuntimeCatalog
+  open={showRuntimeCatalog}
+  on:close={() => showRuntimeCatalog = false}
+  on:changed={() => loadRuntimeCatalog()}
+  on:installed={(e) => { showRuntimeCatalog = false; loadRuntimeCatalog().then(() => switchTab(e.detail.name)); }}
+/>
 
 <ConfirmDialog
   open={pendingUninstall !== null}
   danger={true}
   busy={uninstallingVersion !== null}
-  title={pendingUninstall ? $t('runtimes.confirmUninstallTitle', activeTab, pendingUninstall) : ''}
+  title={pendingUninstall ? $t('runtimes.confirmUninstallTitle', activeLabel, pendingUninstall) : ''}
   message={$t('runtimes.confirmUninstallMsg')}
   confirmLabel={uninstallingVersion ? $t('runtimes.uninstalling') : $t('runtimes.uninstall')}
   on:confirm={confirmUninstall}

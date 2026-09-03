@@ -26,6 +26,7 @@ import (
 	"DevBox/internal/tools"
 	"DevBox/internal/tunnel"
 	"DevBox/internal/updater"
+	"DevBox/internal/vfox"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -155,8 +156,13 @@ func (a *App) startup(ctx context.Context) {
 	// Set language from config
 	i18n.SetLanguage(cfg.Language)
 
-	// Initialize runtime and service managers
+	// Initialize runtime and service managers, then the vfox plugin runtimes
+	// installed under <data>/plugins (java, dotnet, ruby...).
 	runtime.InitAll()
+	vfox.AppVersion = updater.Version
+	for _, err := range runtime.RegisterPlugins() {
+		debugLog("plugin runtime: %v", err)
+	}
 	service.InitAll()
 
 	// Composer used to live inside the active PHP directory; it now has its
@@ -480,16 +486,30 @@ func (a *App) InstallRuntime(name, version string) error {
 		return fmt.Errorf("unknown runtime: %s", name)
 	}
 
+	// Plugin runtimes accept aliases ("latest", "21"); the plugin resolves
+	// them during install and the resolved version is what becomes global.
+	resolved := version
 	a.runRuntimeJob(name, version, func(progress chan<- runtime.Progress) error {
+		if pm, err := runtime.PluginManagerFor(name); err == nil {
+			v, err := pm.InstallResolved(version, progress)
+			if v != "" {
+				resolved = v
+			}
+			return err
+		}
 		return mgr.Install(version, progress)
 	}, func() map[string]interface{} {
+		extra := map[string]interface{}{"resolvedVersion": resolved}
 		// Auto-set as global if it's the first install
 		global, _ := mgr.GetGlobal()
 		if global == "" {
-			mgr.SetGlobal(version)
-			pathenv.AddToPath(mgr.BinaryPath(version))
+			if err := mgr.SetGlobal(resolved); err == nil {
+				if err := a.activateRuntimeEnv(mgr, "", resolved); err != nil {
+					debugLog("activate %s %s: %v", name, resolved, err)
+				}
+			}
 		}
-		return nil
+		return extra
 	})
 	return nil
 }
@@ -578,9 +598,11 @@ func (a *App) UpdateRuntime(name, from, to string) error {
 
 		global, _ := mgr.GetGlobal()
 		if global == from {
-			pathenv.RemoveFromPath(mgr.BinaryPath(from))
+			a.deactivateRuntimeEnv(mgr, from)
 			mgr.SetGlobal(to)
-			pathenv.AddToPath(mgr.BinaryPath(to))
+			if err := a.activateRuntimeEnv(mgr, "", to); err != nil {
+				debugLog("activate %s %s: %v", name, to, err)
+			}
 		}
 
 		// Re-point project pins.
@@ -630,10 +652,10 @@ func (a *App) UninstallRuntime(name, version string) error {
 		return nil
 	}
 
-	// Remove from PATH if this is the global version
+	// Remove from PATH (and drop managed variables) if this is the global version
 	global, _ := mgr.GetGlobal()
 	if global == version {
-		pathenv.RemoveFromPath(mgr.BinaryPath(version))
+		a.deactivateRuntimeEnv(mgr, version)
 	}
 
 	if name == "php" {
@@ -661,25 +683,20 @@ func (a *App) SetGlobalRuntime(name, version string) error {
 		return nil
 	}
 
-	// Switch PATH: remove old, add new
 	oldGlobal, _ := mgr.GetGlobal()
-	if oldGlobal != "" {
-		pathenv.RemoveFromPath(mgr.BinaryPath(oldGlobal))
-	}
-
 	if err := mgr.SetGlobal(version); err != nil {
 		return err
 	}
 
-	if err := pathenv.AddToPath(mgr.BinaryPath(version)); err != nil {
+	// Switch PATH (and JAVA_HOME-style variables for plugin runtimes).
+	if err := a.activateRuntimeEnv(mgr, oldGlobal, version); err != nil {
 		return err
 	}
 
 	// The default php-cgi (port 9000) follows the global version; unpinned
-	// projects follow it too, so vhosts and instances are reconciled.
-	if name == "php" || name == "node" || name == "python" || name == "go" || name == "rust" {
-		go a.regenerateAllVhosts()
-	}
+	// projects of any runtime follow it too, so vhosts and instances are
+	// reconciled.
+	go a.regenerateAllVhosts()
 	return nil
 }
 
@@ -696,12 +713,9 @@ func (a *App) GetGlobalRuntime(name string) string {
 // --- Legacy bindings for Dashboard ---
 
 func (a *App) GetInstalledRuntimes() map[string][]string {
-	result := map[string][]string{
-		"go":     {},
-		"node":   {},
-		"php":    {},
-		"python": {},
-		"rust":   {},
+	result := map[string][]string{}
+	for _, name := range runtime.Names() {
+		result[name] = []string{}
 	}
 	for name, mgr := range runtime.Registry {
 		versions, err := mgr.ListInstalled()

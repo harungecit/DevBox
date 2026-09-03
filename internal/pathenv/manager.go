@@ -44,3 +44,18 @@ func SwitchRuntimePath(runtimeName, oldPath, newPath string) error {
 func GetSystemPATH() ([]string, error) {
 	return platform.GetSystemPATH()
 }
+
+// SetUserEnv writes a user-level environment variable (not PATH).
+func SetUserEnv(key, value string) error {
+	return platform.SetUserEnv(key, value)
+}
+
+// UnsetUserEnv removes a user-level environment variable.
+func UnsetUserEnv(key string) error {
+	return platform.UnsetUserEnv(key)
+}
+
+// GetUserEnv reads a user-level environment variable.
+func GetUserEnv(key string) (string, bool) {
+	return platform.GetUserEnv(key)
+}

@@ -2,11 +2,10 @@
   import { t } from '../lib/i18n/index';
   import StatusBadge from '../lib/components/StatusBadge.svelte';
   import { currentPage } from '../lib/stores/app';
-  import { serviceLogos, runtimeLogos } from '../lib/logos';
+  import { serviceLogos, runtimeLogo } from '../lib/logos';
+  import { runtimeCatalog, loadRuntimeCatalog } from '../lib/stores/runtimes';
   import {
-    GetInstalledRuntimes,
     GetAllServices,
-    GetGlobalRuntime,
     StartService,
     StopService,
     GetProxyStatus,
@@ -27,9 +26,7 @@
     installed: boolean;
   }
 
-  let runtimes: Record<string, string[]> = {};
   let services: Record<string, ServiceInfo> = {};
-  let activeVersions: Record<string, string> = {};
   let loading = true;
   let togglingService: string = '';
 
@@ -88,18 +85,10 @@
     proxyBusy = false;
   }
 
-  const runtimeLabels: Record<string, string> = {
-    go: 'Go', node: 'Node.js', php: 'PHP', python: 'Python', rust: 'Rust'
-  };
-
   async function loadData() {
     try {
-      runtimes = await GetInstalledRuntimes() || {};
+      await loadRuntimeCatalog();
       services = await GetAllServices() || {};
-
-      for (const rt of Object.keys(runtimes)) {
-        activeVersions[rt] = await GetGlobalRuntime(rt);
-      }
     } catch (e) {
       console.error('Dashboard load error:', e);
     } finally {
@@ -128,7 +117,7 @@
 
   $: installedServices = Object.values(services).filter(s => s.installed);
   $: runningServices = installedServices.filter(s => s.status === 'running');
-  $: runtimeEntries = Object.entries(runtimes);
+  $: runtimeEntries = $runtimeCatalog;
 
   async function toggleService(svc: ServiceInfo) {
     togglingService = svc.name;
@@ -308,21 +297,24 @@
 
       {#if runtimeEntries.length > 0}
         <div class="divide-y divide-[var(--color-border)]">
-          {#each runtimeEntries as [name, versions]}
+          {#each runtimeEntries as rt (rt.name)}
             <div class="flex items-center justify-between px-5 py-3 hover:bg-[var(--color-bg)]/50 transition-colors">
               <div class="flex items-center gap-3">
                 <div class="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0">
-                  {@html runtimeLogos[name] || ''}
+                  {@html runtimeLogo(rt.name, rt.displayName)}
                 </div>
                 <div>
-                  <p class="text-sm font-semibold leading-tight">{runtimeLabels[name] || name}</p>
+                  <p class="text-sm font-semibold leading-tight flex items-center gap-1.5">
+                    {rt.displayName}
+                    {#if rt.plugin}<span class="text-[8px] px-1 rounded bg-primary-500/10 text-primary-500 uppercase font-bold">{$t('runtimes.pluginTab')}</span>{/if}
+                  </p>
                 </div>
               </div>
               <div class="flex items-center gap-2">
-                {#if activeVersions[name]}
+                {#if rt.global}
                   <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-primary-500/10 border border-primary-500/20">
                     <span class="text-[10px] font-bold text-primary-400 uppercase">{$t('dashboard.activeVersion')}</span>
-                    <span class="text-xs font-mono font-bold text-primary-500">{activeVersions[name]}</span>
+                    <span class="text-xs font-mono font-bold text-primary-500">{rt.global}</span>
                   </div>
                 {:else}
                   <span class="text-[10px] text-[var(--color-text-secondary)] px-2.5 py-1 rounded-lg border border-dashed border-[var(--color-border)]">

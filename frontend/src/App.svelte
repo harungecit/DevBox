@@ -3,12 +3,15 @@
   import Sidebar from './lib/components/Sidebar.svelte';
   import { currentPage, theme, applyTheme, loadConfig } from './lib/stores/app';
   import { initInstallListeners } from './lib/stores/installs';
+  import { initRuntimeCatalog } from './lib/stores/runtimes';
   import { initI18n } from './lib/i18n/index';
 
   // Attach the global install listeners (runtimes + services) once, at app
   // startup, so install progress survives navigating away from and back to the
   // page that started it.
   initInstallListeners();
+  // Runtime identity (tabs, labels, logos) comes from the backend catalog.
+  initRuntimeCatalog();
 
   import Dashboard from './pages/Dashboard.svelte';
   import Runtimes from './pages/Runtimes.svelte';

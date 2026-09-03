@@ -28,6 +28,16 @@ export const runtimeInstalls = { subscribe: _runtimeInstalls.subscribe };
 const _serviceInstalls = writable<Record<string, ServiceInstallState>>({});
 export const serviceInstalls = { subscribe: _serviceInstalls.subscribe };
 
+// vfox plugin jobs (install / update). Keyed by plugin name — or by the
+// source URL for "install from URL", until the plugin's real name is known.
+export interface PluginJobState {
+  action: string;
+  message: string;
+  error?: string;
+}
+const _pluginInstalls = writable<Record<string, PluginJobState>>({});
+export const pluginInstalls = { subscribe: _pluginInstalls.subscribe };
+
 let listenersRegistered = false;
 
 // initInstallListeners attaches global Wails listeners that keep both stores
@@ -67,6 +77,35 @@ export function initInstallListeners() {
       ...s,
       [data.name]: {
         ...(s[data.name] ?? { version: '', percent: 0, message: '' }),
+        error: data.error ?? 'Unknown error',
+      },
+    }));
+  });
+
+  // --- Plugin (vfox) job events ---
+
+  EventsOn('plugin:progress', (data: any) => {
+    if (!data?.name) return;
+    _pluginInstalls.update(s => ({
+      ...s,
+      [data.name]: { action: data.action ?? s[data.name]?.action ?? 'install', message: data.message ?? '', error: undefined },
+    }));
+  });
+
+  EventsOn('plugin:installed', (data: any) => {
+    if (!data?.name) return;
+    _pluginInstalls.update(s => {
+      const { [data.name]: _removed, ...rest } = s;
+      return rest;
+    });
+  });
+
+  EventsOn('plugin:error', (data: any) => {
+    if (!data?.name) return;
+    _pluginInstalls.update(s => ({
+      ...s,
+      [data.name]: {
+        ...(s[data.name] ?? { action: 'install', message: '' }),
         error: data.error ?? 'Unknown error',
       },
     }));
@@ -137,6 +176,18 @@ export function startServiceInstall(name: string, initialMessage: string = '', i
 
 export function clearServiceInstall(name: string) {
   _serviceInstalls.update(s => {
+    const { [name]: _removed, ...rest } = s;
+    return rest;
+  });
+}
+
+// Plugin equivalents.
+export function startPluginJob(name: string, action: string = 'install') {
+  _pluginInstalls.update(s => ({ ...s, [name]: { action, message: '', error: undefined } }));
+}
+
+export function clearPluginJob(name: string) {
+  _pluginInstalls.update(s => {
     const { [name]: _removed, ...rest } = s;
     return rest;
   });

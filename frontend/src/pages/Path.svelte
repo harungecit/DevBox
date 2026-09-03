@@ -1,10 +1,24 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { t } from '../lib/i18n/index';
-  import { serviceLogos, runtimeLogos } from '../lib/logos';
+  import { serviceLogos, runtimeLogo } from '../lib/logos';
   import AppIcon from '../lib/components/AppIcon.svelte';
   import { appConfig } from '../lib/stores/app';
-  import { GetPATHEntries, AddToPATH, RemoveFromPATH } from '../../wailsjs/go/main/App';
+  import { runtimeCatalog } from '../lib/stores/runtimes';
+  import type { RuntimeMeta } from '../lib/stores/runtimes';
+  import { GetPATHEntries, AddToPATH, RemoveFromPATH, GetManagedEnv } from '../../wailsjs/go/main/App';
+  import { EventsOn } from '../../wailsjs/runtime/runtime';
+
+  // Environment variables DevBox wrote for plugin runtimes (JAVA_HOME…).
+  interface ManagedEnvVar { key: string; value: string; runtime: string; version: string }
+  let managedEnv: ManagedEnvVar[] = [];
+  async function loadManagedEnv() {
+    try {
+      managedEnv = ((await GetManagedEnv()) || []) as ManagedEnvVar[];
+    } catch (e) {
+      console.error('managed env:', e);
+    }
+  }
 
   let pathEntries: string[] = [];
   let newPath: string = '';
@@ -62,21 +76,23 @@
   //   <data>\tools\bun             → bun
   interface EntryKind { label: string; icon: string; version: string }
 
-  const runtimeLabels: Record<string, string> = { go: 'Go', node: 'Node.js', php: 'PHP', python: 'Python', rust: 'Rust' };
+  // Runtime ids → catalog entries (built-ins and plugins alike).
+  $: catalogMap = Object.fromEntries($runtimeCatalog.map((m) => [m.name, m])) as Record<string, RuntimeMeta>;
   const serviceLabels: Record<string, string> = {
     nginx: 'Nginx', apache: 'Apache', caddy: 'Caddy', frankenphp: 'FrankenPHP', postgres: 'PostgreSQL',
     mysql: 'MySQL', mariadb: 'MariaDB', mongodb: 'MongoDB', redis: 'Redis', valkey: 'Valkey', mailpit: 'Mailpit',
   };
   const toolLabels: Record<string, string> = { bun: 'Bun', mkcert: 'mkcert', cloudflared: 'cloudflared', composer: 'Composer' };
 
-  function classify(entry: string): EntryKind {
+  function classify(entry: string, catalog: Record<string, RuntimeMeta>): EntryKind {
     const parts = entry.split(/[\\/]/).filter(Boolean).map(p => p.toLowerCase());
     const at = (name: string) => parts.indexOf(name);
 
     const r = at('runtimes');
-    if (r >= 0 && parts[r + 1] && runtimeLabels[parts[r + 1]]) {
+    if (r >= 0 && parts[r + 1]) {
       const id = parts[r + 1];
-      return { label: runtimeLabels[id], icon: runtimeLogos[id] || '', version: parts[r + 2] || '' };
+      const meta = catalog[id];
+      return { label: meta?.displayName || id, icon: runtimeLogo(id, meta?.displayName), version: parts[r + 2] || '' };
     }
     const s = at('services');
     if (s >= 0 && parts[s + 1] && serviceLabels[parts[s + 1]]) {
@@ -91,7 +107,14 @@
     return { label: 'DevBox', icon: '', version: '' };
   }
 
-  onMount(loadPATH);
+  let unsubs: Array<() => void> = [];
+  onMount(() => {
+    loadPATH();
+    loadManagedEnv();
+    unsubs.push(EventsOn('runtimes:changed', () => { loadPATH(); loadManagedEnv(); }));
+    unsubs.push(EventsOn('runtime:installed', () => { loadPATH(); loadManagedEnv(); }));
+  });
+  onDestroy(() => { unsubs.forEach(fn => fn()); unsubs = []; });
 </script>
 
 <div class="space-y-6">
@@ -133,7 +156,7 @@
     {#if managedEntries.length > 0}
       <div class="space-y-2">
         {#each managedEntries as entry}
-          {@const kind = classify(entry)}
+          {@const kind = classify(entry, catalogMap)}
           <div class="flex items-center justify-between p-3 rounded-xl border border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all group">
             <div class="flex items-center gap-4 flex-1 min-w-0">
               <div class="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 shadow-sm bg-white dark:bg-slate-700 p-1 flex items-center justify-center">
@@ -169,6 +192,37 @@
         <p class="text-sm font-medium">{$t('path.empty')}</p>
         <p class="text-xs mt-1 opacity-60">{$t('path.emptyHint')}</p>
       </div>
+    {/if}
+  </div>
+
+  <!-- Environment variables managed by DevBox (plugin runtimes) -->
+  <div class="card p-5">
+    <div class="mb-4">
+      <h3 class="text-base font-bold flex items-center gap-2">
+        <svg class="w-5 h-5 text-purple-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+        </svg>
+        {$t('path.envTitle')}
+        <span class="badge badge-info">{managedEnv.length}</span>
+      </h3>
+      <p class="text-xs text-[var(--color-text-secondary)] mt-1">{$t('path.envDesc')}</p>
+    </div>
+    {#if managedEnv.length > 0}
+      <div class="space-y-1.5">
+        {#each managedEnv as v (v.key)}
+          {@const meta = catalogMap[v.runtime]}
+          <div class="flex items-center gap-3 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
+            <div class="w-7 h-7 rounded-lg overflow-hidden flex-shrink-0 bg-white dark:bg-slate-700 p-1">{@html runtimeLogo(v.runtime, meta?.displayName)}</div>
+            <div class="min-w-0 flex-1">
+              <p class="text-xs font-bold font-mono">{v.key}</p>
+              <p class="font-mono text-[10px] text-slate-500 truncate" title={v.value}>{v.value}</p>
+            </div>
+            <span class="text-[10px] text-[var(--color-text-secondary)] shrink-0">{meta?.displayName || v.runtime} <span class="font-mono text-primary-500">{v.version}</span></span>
+          </div>
+        {/each}
+      </div>
+    {:else}
+      <p class="text-xs text-[var(--color-text-secondary)] italic">{$t('path.envEmpty')}</p>
     {/if}
   </div>
 

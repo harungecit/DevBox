@@ -131,7 +131,17 @@ func StartDevServer(proj Project) (int, error) {
 		"HOST=127.0.0.1",
 	)
 	if binDir != "" {
-		cmd.Env = append(cmd.Env, "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		// Plugin runtimes may need several dirs and variables (JAVA_HOME...).
+		pathDirs := []string{binDir}
+		if mgr, ok := runtime.Registry[proj.Runtime]; ok {
+			if ver := ResolveRuntimeVersion(proj); ver != "" {
+				pathDirs = runtime.ActivationPaths(mgr, ver)
+				for k, v := range runtime.ActivationVars(mgr, ver) {
+					cmd.Env = append(cmd.Env, k+"="+v)
+				}
+			}
+		}
+		cmd.Env = append(cmd.Env, "PATH="+strings.Join(pathDirs, string(os.PathListSeparator))+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 
 	// Create new process group + hide window (platform-aware)

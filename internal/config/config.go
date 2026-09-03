@@ -47,6 +47,20 @@ type Config struct {
 	// The globally active version always gets 9000; pinned versions get 9001+.
 	PhpCgiPorts map[string]int   `json:"phpCgiPorts"`
 	Cloudflare  CloudflareConfig `json:"cloudflare"`
+	// PluginRegistry overrides the vfox plugin registry URL ("" = the public
+	// https://version-fox.github.io/vfox-plugins).
+	PluginRegistry string `json:"pluginRegistry,omitempty"`
+	// ManagedEnv records the user environment variables DevBox wrote when a
+	// plugin runtime was made global (JAVA_HOME, GOROOT…), keyed by variable
+	// name, so they can be shown and removed even after the plugin is gone.
+	ManagedEnv map[string]ManagedEnvEntry `json:"managedEnv"`
+}
+
+// ManagedEnvEntry is one environment variable DevBox manages for a runtime.
+type ManagedEnvEntry struct {
+	Value   string `json:"value"`
+	Runtime string `json:"runtime"`
+	Version string `json:"version"`
 }
 
 var (
@@ -72,6 +86,7 @@ func DefaultConfig() *Config {
 		AutoStartSvcs:     []string{},
 		VersionCacheHours: 48,
 		PhpCgiPorts:       map[string]int{},
+		ManagedEnv:        map[string]ManagedEnvEntry{},
 	}
 }
 
@@ -132,6 +147,9 @@ func Load() (*Config, error) {
 		if instance.PhpCgiPorts == nil {
 			instance.PhpCgiPorts = map[string]int{}
 		}
+		if instance.ManagedEnv == nil {
+			instance.ManagedEnv = map[string]ManagedEnvEntry{}
+		}
 		if instance.VersionCacheHours <= 0 {
 			instance.VersionCacheHours = 48
 		}
@@ -178,6 +196,18 @@ func Save() error {
 // Get returns the current config (read-only access)
 func Get() *Config {
 	mu.RLock()
+	if instance != nil {
+		defer mu.RUnlock()
+		return instance
+	}
+	mu.RUnlock()
+	// Not loaded yet: read config from disk instead of fabricating a blank
+	// default. Otherwise a caller that reaches Get() before Load() (e.g. a
+	// tool or test) would hand a later Save() an empty config that overwrites
+	// the real activeRuntimes/settings on disk. Load() is sync.Once-guarded,
+	// so after the app's startup Load this branch never runs.
+	Load()
+	mu.RLock()
 	defer mu.RUnlock()
 	if instance == nil {
 		instance = DefaultConfig()
@@ -222,11 +252,8 @@ func ConfigPath() string {
 func EnsureDirectories() error {
 	base := GetDataDir()
 	dirs := []string{
-		filepath.Join(base, "runtimes", "go"),
-		filepath.Join(base, "runtimes", "node"),
-		filepath.Join(base, "runtimes", "php"),
-		filepath.Join(base, "runtimes", "python"),
-		filepath.Join(base, "runtimes", "rust"),
+		filepath.Join(base, "runtimes"),
+		filepath.Join(base, "plugins"),
 		filepath.Join(base, "services"),
 		filepath.Join(base, "projects"),
 		filepath.Join(base, "ssl", "certs"),

@@ -18,6 +18,10 @@ export function CheckPort(arg1) {
   return window['go']['main']['App']['CheckPort'](arg1);
 }
 
+export function CheckVfoxPluginUpdates() {
+  return window['go']['main']['App']['CheckVfoxPluginUpdates']();
+}
+
 export function CloneGitProject(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CloneGitProject'](arg1, arg2, arg3, arg4);
 }
@@ -32,6 +36,10 @@ export function DetectExternalDBTools() {
 
 export function DetectFramework(arg1) {
   return window['go']['main']['App']['DetectFramework'](arg1);
+}
+
+export function DetectLegacyRuntimeVersion(arg1) {
+  return window['go']['main']['App']['DetectLegacyRuntimeVersion'](arg1);
 }
 
 export function DisablePnpm() {
@@ -146,6 +154,10 @@ export function GetLocale(arg1) {
   return window['go']['main']['App']['GetLocale'](arg1);
 }
 
+export function GetManagedEnv() {
+  return window['go']['main']['App']['GetManagedEnv']();
+}
+
 export function GetMigrationNotice() {
   return window['go']['main']['App']['GetMigrationNotice']();
 }
@@ -218,6 +230,10 @@ export function GetRunningTunnels() {
   return window['go']['main']['App']['GetRunningTunnels']();
 }
 
+export function GetRuntimeCatalog() {
+  return window['go']['main']['App']['GetRuntimeCatalog']();
+}
+
 export function GetRuntimeUpdates(arg1) {
   return window['go']['main']['App']['GetRuntimeUpdates'](arg1);
 }
@@ -240,6 +256,14 @@ export function GetServiceVersions(arg1) {
 
 export function GetTunnelURL(arg1) {
   return window['go']['main']['App']['GetTunnelURL'](arg1);
+}
+
+export function GetVfoxPluginManifest(arg1) {
+  return window['go']['main']['App']['GetVfoxPluginManifest'](arg1);
+}
+
+export function GetVfoxRegistry(arg1) {
+  return window['go']['main']['App']['GetVfoxRegistry'](arg1);
 }
 
 export function GetWebServerPort() {
@@ -304,6 +328,14 @@ export function InstallRuntime(arg1, arg2) {
 
 export function InstallService(arg1, arg2, arg3) {
   return window['go']['main']['App']['InstallService'](arg1, arg2, arg3);
+}
+
+export function InstallVfoxPlugin(arg1) {
+  return window['go']['main']['App']['InstallVfoxPlugin'](arg1);
+}
+
+export function InstallVfoxPluginFromURL(arg1) {
+  return window['go']['main']['App']['InstallVfoxPluginFromURL'](arg1);
 }
 
 export function IsAdminerInstalled() {
@@ -428,6 +460,10 @@ export function RemoveFromPATH(arg1) {
 
 export function RemoveProject(arg1) {
   return window['go']['main']['App']['RemoveProject'](arg1);
+}
+
+export function RemoveVfoxPlugin(arg1, arg2) {
+  return window['go']['main']['App']['RemoveVfoxPlugin'](arg1, arg2);
 }
 
 export function RestartPHPCGI() {
@@ -636,6 +672,10 @@ export function UpdateRuntime(arg1, arg2, arg3) {
 
 export function UpdateService(arg1, arg2) {
   return window['go']['main']['App']['UpdateService'](arg1, arg2);
+}
+
+export function UpdateVfoxPlugin(arg1) {
+  return window['go']['main']['App']['UpdateVfoxPlugin'](arg1);
 }
 
 export function VerifyCloudflareToken(arg1) {

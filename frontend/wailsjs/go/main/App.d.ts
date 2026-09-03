@@ -9,6 +9,7 @@ import {runtime} from '../models';
 import {config} from '../models';
 import {devtools} from '../models';
 import {main} from '../models';
+import {vfox} from '../models';
 import {terminal} from '../models';
 import {discovery} from '../models';
 
@@ -20,6 +21,8 @@ export function CheckForUpdate():Promise<updater.Release>;
 
 export function CheckPort(arg1:number):Promise<service.PortStatus>;
 
+export function CheckVfoxPluginUpdates():Promise<Record<string, string>>;
+
 export function CloneGitProject(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function ConfigureCloudflare(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
@@ -27,6 +30,8 @@ export function ConfigureCloudflare(arg1:string,arg2:string,arg3:string,arg4:str
 export function DetectExternalDBTools():Promise<Array<tools.ExternalTool>>;
 
 export function DetectFramework(arg1:string):Promise<string>;
+
+export function DetectLegacyRuntimeVersion(arg1:string):Promise<string>;
 
 export function DisablePnpm():Promise<void>;
 
@@ -84,6 +89,8 @@ export function GetLastUpdateCheck():Promise<updater.Release>;
 
 export function GetLocale(arg1:string):Promise<Record<string, string>>;
 
+export function GetManagedEnv():Promise<Array<main.ManagedEnvVar>>;
+
 export function GetMigrationNotice():Promise<main.MigrationNotice>;
 
 export function GetNpmLatestVersion():Promise<string>;
@@ -120,6 +127,8 @@ export function GetRunningDevServers():Promise<Record<string, number>>;
 
 export function GetRunningTunnels():Promise<Record<string, string>>;
 
+export function GetRuntimeCatalog():Promise<Array<main.RuntimeMeta>>;
+
 export function GetRuntimeUpdates(arg1:string):Promise<Array<runtime.RuntimeUpdate>>;
 
 export function GetServiceDetails(arg1:string):Promise<main.ServiceDetailInfo>;
@@ -131,6 +140,10 @@ export function GetServiceStatus():Promise<Record<string, string>>;
 export function GetServiceVersions(arg1:string):Promise<Array<service.AvailableVersion>>;
 
 export function GetTunnelURL(arg1:string):Promise<string>;
+
+export function GetVfoxPluginManifest(arg1:string):Promise<vfox.Manifest>;
+
+export function GetVfoxRegistry(arg1:boolean):Promise<main.VfoxRegistryResult>;
 
 export function GetWebServerPort():Promise<number>;
 
@@ -163,6 +176,10 @@ export function InstallProxy():Promise<void>;
 export function InstallRuntime(arg1:string,arg2:string):Promise<void>;
 
 export function InstallService(arg1:string,arg2:string,arg3:number):Promise<void>;
+
+export function InstallVfoxPlugin(arg1:string):Promise<void>;
+
+export function InstallVfoxPluginFromURL(arg1:string):Promise<void>;
 
 export function IsAdminerInstalled():Promise<boolean>;
 
@@ -225,6 +242,8 @@ export function ReloadProxy():Promise<void>;
 export function RemoveFromPATH(arg1:string):Promise<void>;
 
 export function RemoveProject(arg1:string):Promise<void>;
+
+export function RemoveVfoxPlugin(arg1:string,arg2:boolean):Promise<void>;
 
 export function RestartPHPCGI():Promise<void>;
 
@@ -329,5 +348,7 @@ export function UpdateNpm():Promise<void>;
 export function UpdateRuntime(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function UpdateService(arg1:string,arg2:string):Promise<void>;
+
+export function UpdateVfoxPlugin(arg1:string):Promise<void>;
 
 export function VerifyCloudflareToken(arg1:string):Promise<main.CloudflareVerifyResult>;

@@ -37,17 +37,7 @@ func (a *App) SetTerminal(id string) error {
 // devboxPathDirs lists every DevBox-managed bin dir for the general terminal:
 // global runtimes first, then tools (bun, uv, go/cargo installs…).
 func devboxPathDirs() []string {
-	var dirs []string
-	for _, name := range []string{"php", "node", "python", "go", "rust"} {
-		if mgr, ok := runtime.Registry[name]; ok {
-			if v, err := mgr.GetGlobal(); err == nil && v != "" {
-				dirs = append(dirs, mgr.BinaryPath(v))
-				if name == "python" && goruntime.GOOS == "windows" {
-					dirs = append(dirs, filepath.Join(mgr.BinaryPath(v), "Scripts"))
-				}
-			}
-		}
-	}
+	dirs := runtime.ManagedPathDirs()
 	tools := filepath.Join(config.GetDataDir(), "tools")
 	for _, sub := range []string{"bun", "composer", "uv", "gobin", filepath.Join("cargo", "bin"), "mkcert", "cloudflared"} {
 		if d := filepath.Join(tools, sub); dirExists(d) {
@@ -62,6 +52,17 @@ func dirExists(p string) bool {
 	return err == nil && st.IsDir()
 }
 
+// devboxEnvVars adds the variables plugin runtimes' global versions need
+// (JAVA_HOME, GOROOT...) to base without overriding what is already there.
+func devboxEnvVars(base map[string]string) map[string]string {
+	for k, v := range runtime.ManagedEnvVars() {
+		if _, exists := base[k]; !exists {
+			base[k] = v
+		}
+	}
+	return base
+}
+
 // OpenTerminal opens the general DevBox terminal in the projects folder.
 func (a *App) OpenTerminal() error {
 	dir := filepath.Join(config.GetDataDir(), "projects")
@@ -72,7 +73,7 @@ func (a *App) OpenTerminal() error {
 		Title: "devbox",
 		Dir:   dir,
 		Path:  devboxPathDirs(),
-		Env:   map[string]string{"DEVBOX_HOME": config.GetDataDir()},
+		Env:   devboxEnvVars(map[string]string{"DEVBOX_HOME": config.GetDataDir()}),
 	})
 }
 
@@ -88,17 +89,23 @@ func (a *App) OpenProjectTerminal(name string) error {
 			continue
 		}
 		var dirs []string
-		if bin := project.ResolveRuntimeBinDir(p); bin != "" {
-			dirs = append(dirs, bin)
-			if p.Runtime == "python" && goruntime.GOOS == "windows" {
-				dirs = append(dirs, filepath.Join(bin, "Scripts"))
-			}
-		}
-		dirs = append(dirs, devboxPathDirs()...)
 		env := map[string]string{
 			"DEVBOX_PROJECT": p.Name,
 			"DEVBOX_HOME":    config.GetDataDir(),
 		}
+		if mgr, ok := runtime.Registry[p.Runtime]; ok {
+			if ver := project.ResolveRuntimeVersion(p); ver != "" {
+				dirs = append(dirs, runtime.ActivationPaths(mgr, ver)...)
+				if p.Runtime == "python" && goruntime.GOOS == "windows" {
+					dirs = append(dirs, filepath.Join(mgr.BinaryPath(ver), "Scripts"))
+				}
+				for k, v := range runtime.ActivationVars(mgr, ver) {
+					env[k] = v // the pinned version wins over the global one
+				}
+			}
+		}
+		dirs = append(dirs, devboxPathDirs()...)
+		env = devboxEnvVars(env)
 		if p.Domain != "" {
 			env["DEVBOX_DOMAIN"] = p.Domain
 		}
@@ -120,7 +127,7 @@ func (a *App) OpenServiceTerminal(name string) error {
 	base := filepath.Join(config.GetDataDir(), "services", name)
 	port := strconv.Itoa(mgr.Port())
 	user, pass := service.Credentials(name)
-	s := terminal.Session{Title: name, Dir: base, Env: map[string]string{"DEVBOX_HOME": config.GetDataDir()}}
+	s := terminal.Session{Title: name, Dir: base, Env: devboxEnvVars(map[string]string{"DEVBOX_HOME": config.GetDataDir()})}
 
 	bin := filepath.Join(base, "bin")
 	switch name {

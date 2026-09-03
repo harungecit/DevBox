@@ -3,12 +3,16 @@ module DevBox
 go 1.24.0
 
 require (
+	github.com/PuerkitoBio/goquery v1.9.3
 	github.com/energye/systray v1.0.3
+	github.com/ulikunitz/xz v0.5.12
 	github.com/wailsapp/wails/v2 v2.11.0
+	github.com/yuin/gopher-lua v1.1.1
 	golang.org/x/sys v0.41.0
 )
 
 require (
+	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect

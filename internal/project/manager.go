@@ -10,6 +10,7 @@ import (
 
 	"DevBox/internal/config"
 	"DevBox/internal/platform"
+	"DevBox/internal/runtime"
 )
 
 // Project represents a registered development project
@@ -28,7 +29,8 @@ type Project struct {
 	// Runtime is the language/category the project is built on. Independent of
 	// Framework so it survives framework misdetection. Derived from Framework if
 	// empty during ListProjects (backward-compat migration for older entries).
-	// Values: "php" | "node" | "go" | "python" | "rust" | "static".
+	// Values: any registered runtime name ("php", "node", "go", "python",
+	// "rust", or a plugin runtime such as "java") | "static".
 	Runtime string `json:"runtime,omitempty"`
 
 	// RuntimeVersion pins the project to a specific runtime version. Empty means
@@ -154,6 +156,11 @@ func AddProject(projectPath, domain string) (*Project, error) {
 		Runtime:   rt,
 		Webserver: DefaultWebserverForRuntime(rt),
 	}
+	// A legacy version file (.nvmrc, .java-version, .tool-versions...) pins
+	// the project when its runtime is plugin-backed and knows the format.
+	if v, ok := LegacyRuntimeVersion(rt, projectPath); ok {
+		project.RuntimeVersion = v
+	}
 
 	projects, err := ListProjects()
 	if err != nil {
@@ -223,11 +230,17 @@ func SetProjectSSL(name string, ssl bool) error {
 	return nil
 }
 
-// validRuntimes / validWebservers gate the public setters so the persisted
-// values stay within the known vocabulary the rest of DevBox expects.
-var validRuntimes = map[string]bool{
-	"php": true, "node": true, "go": true, "python": true, "rust": true, "static": true,
+// isValidRuntime / validWebservers gate the public setters so the persisted
+// values stay within the vocabulary the rest of DevBox expects: any registered
+// runtime (built-in or plugin) plus "static".
+func isValidRuntime(rt string) bool {
+	if rt == "static" {
+		return true
+	}
+	_, ok := runtime.Registry[rt]
+	return ok
 }
+
 var validWebservers = map[string]bool{
 	"auto": true, "nginx": true, "caddy": true, "apache": true, "frankenphp": true, "devserver": true,
 }
@@ -235,7 +248,7 @@ var validWebservers = map[string]bool{
 // SetProjectRuntime overrides a project's runtime. Empty string resets to
 // auto-derived-from-Framework behavior.
 func SetProjectRuntime(name, rt string) error {
-	if rt != "" && !validRuntimes[rt] {
+	if rt != "" && !isValidRuntime(rt) {
 		return fmt.Errorf("invalid runtime %q", rt)
 	}
 	projects, err := ListProjects()

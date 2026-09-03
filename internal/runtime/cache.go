@@ -126,6 +126,9 @@ func updateCandidate(name string, v Version) bool {
 	case "go", "rust":
 		return v.Stable
 	}
+	if IsPluginRuntime(name) {
+		return v.Stable
+	}
 	// node: Stable means LTS; non-LTS releases within the same major are still
 	// regular releases. php/python lists only contain stable versions.
 	return true

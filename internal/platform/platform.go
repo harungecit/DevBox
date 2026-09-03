@@ -30,6 +30,14 @@ type Platform interface {
 	BroadcastPathChange()
 	PathContains(dir string) bool
 
+	// User environment variables other than PATH (JAVA_HOME, GOROOT…) that
+	// plugin runtimes need. Windows: HKCU\Environment + WM_SETTINGCHANGE;
+	// macOS: <data>/env.sh sourced through path.sh. Keys named PATH are
+	// refused — PATH always goes through the functions above.
+	SetUserEnv(key, value string) error
+	UnsetUserEnv(key string) error
+	GetUserEnv(key string) (string, bool)
+
 	// Hosts file management
 	HostsFilePath() string
 	ReadHostsFile() ([]byte, error)
@@ -91,6 +99,9 @@ func RemoveFromPath(dir string) error                 { return current.RemoveFro
 func GetSystemPATH() ([]string, error)                { return current.GetSystemPATH() }
 func BroadcastPathChange()                            { current.BroadcastPathChange() }
 func PathContains(dir string) bool                    { return current.PathContains(dir) }
+func SetUserEnv(key, value string) error              { return current.SetUserEnv(key, value) }
+func UnsetUserEnv(key string) error                   { return current.UnsetUserEnv(key) }
+func GetUserEnv(key string) (string, bool)            { return current.GetUserEnv(key) }
 func DefaultDataDir() string                          { return current.DefaultDataDir() }
 
 // AutoStartFlag is the CLI flag appended to the login-launch command so DevBox
