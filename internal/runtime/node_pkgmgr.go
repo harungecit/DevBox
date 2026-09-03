@@ -57,7 +57,13 @@ func EnablePkgMgr(name string) error {
 func EnablePkgMgrIn(binDir, name string) error {
 	corepack := filepath.Join(binDir, platform.ScriptName("corepack"))
 	if _, err := os.Stat(corepack); err == nil {
-		enableCmd := exec.Command(corepack, "enable", name)
+		// Without --install-directory corepack locates the shim target via
+		// `which corepack` on the child's PATH. DevBox's own process env does not
+		// contain a Node dir that was installed or made global after launch, so
+		// the lookup fails with "not found: corepack". Name the directory
+		// explicitly and put it on PATH so the shims and `prepare` resolve node.
+		enableCmd := exec.Command(corepack, "enable", "--install-directory", binDir, name)
+		enableCmd.Env = nodeEnv(binDir)
 		platform.SetProcessAttrs(enableCmd, false, true)
 		if out, err := enableCmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("corepack enable %s failed: %s - %w", name, strings.TrimSpace(string(out)), err)
@@ -65,6 +71,7 @@ func EnablePkgMgrIn(binDir, name string) error {
 		// Activate latest stable so the very first call doesn't prompt for a download.
 		// Non-fatal if it fails; the shim is already in place.
 		prepCmd := exec.Command(corepack, "prepare", name+"@stable", "--activate")
+		prepCmd.Env = nodeEnv(binDir)
 		platform.SetProcessAttrs(prepCmd, false, true)
 		prepCmd.CombinedOutput()
 		return nil
@@ -183,6 +190,27 @@ func UpdateNpm() error {
 		return fmt.Errorf("npm self-update failed: %s - %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// nodeEnv returns the current environment with binDir prepended to PATH, so
+// child processes (corepack, its shims, npm) resolve the intended node.exe
+// even when DevBox itself was launched before that Node version existed.
+func nodeEnv(binDir string) []string {
+	env := os.Environ()
+	out := make([]string, 0, len(env)+1)
+	found := false
+	for _, e := range env {
+		if len(e) > 5 && strings.EqualFold(e[:5], "PATH=") {
+			out = append(out, "PATH="+binDir+string(os.PathListSeparator)+e[5:])
+			found = true
+			continue
+		}
+		out = append(out, e)
+	}
+	if !found {
+		out = append(out, "PATH="+binDir)
+	}
+	return out
 }
 
 func activeNodeBinDir() string {
