@@ -6,14 +6,14 @@
 Runtimes · databases · web servers · <code>.test</code> domains · SSL · public sharing — one desktop app, zero containers.</p>
 
 <p align="center">
-  <a href="https://github.com/harungecit/DevBox/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/harungecit/DevBox?display_name=tag&color=08a6d0"></a>
+  <a href="https://github.com/DevBox-App/DevBox/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/DevBox-App/DevBox?display_name=tag&color=08a6d0"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Platform" src="https://img.shields.io/badge/Windows-10%2F11%20x64-0078d4">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-coming%20soon-lightgrey">
 </p>
 
 <p align="center">
-  <a href="https://github.com/harungecit/DevBox/releases/latest"><b>⬇ Download</b></a> ·
+  <a href="https://github.com/DevBox-App/DevBox/releases/latest"><b>⬇ Download</b></a> ·
   <a href="https://devboxapp.com/">Website</a> ·
   <a href="#getting-started">Getting started</a> ·
   <a href="#what-you-get">What you get</a> ·
@@ -39,7 +39,7 @@ Everything lives in a single folder (`C:\DevBox`), and DevBox sends no telemetry
 
 ## Getting started
 
-1. **Download** the installer from the [latest release](https://github.com/harungecit/DevBox/releases/latest) — `DevBox-Setup-<version>-windows-amd64.exe` — and run it.
+1. **Download** the installer from the [latest release](https://github.com/DevBox-App/DevBox/releases/latest) — `DevBox-Setup-<version>-windows-amd64.exe` — and run it.
    Windows SmartScreen may warn on first launch because the app is new; choose **More info → Run anyway**.
 2. **Runtimes** → pick PHP, Node.js, Go, Python or Rust and click **Install**. The first version you install becomes the global one (it's put on your PATH automatically).
 3. **Services** → install a web server (Nginx is a good default) and the database you need, then hit **Start**. Switch on **AUTO** to have them start together with DevBox.
@@ -161,7 +161,7 @@ Uninstalling DevBox leaves this folder — and your data — untouched.
 
 ## Contributing
 
-Bug reports, feature ideas and pull requests are welcome — open an [issue](https://github.com/harungecit/DevBox/issues) to get started. Developer notes live in [`CLAUDE.md`](CLAUDE.md).
+Bug reports, feature ideas and pull requests are welcome — open an [issue](https://github.com/DevBox-App/DevBox/issues) to get started. Developer notes live in [`CLAUDE.md`](CLAUDE.md). The website lives in its own repository: [DevBox-App/website](https://github.com/DevBox-App/website).
 
 ## Acknowledgements
 

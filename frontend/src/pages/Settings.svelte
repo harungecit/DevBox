@@ -372,7 +372,7 @@
           <p class="text-sm font-bold">DevBox <span class="text-primary-500">v{appVersion}</span> <span class="font-normal text-[var(--color-text-secondary)]">· {$t('app.description')}</span></p>
           <p class="text-xs text-[var(--color-text-secondary)]">
             <a href="https://devboxapp.com" target="_blank" class="text-primary-500 hover:underline font-semibold">devboxapp.com</a> ·
-            <a href="https://github.com/harungecit/DevBox" target="_blank" class="text-primary-500 hover:underline">GitHub</a> ·
+            <a href="https://github.com/DevBox-App/DevBox" target="_blank" class="text-primary-500 hover:underline">GitHub</a> ·
             Harun Geçit · <a href="https://harungecit.dev" target="_blank" class="text-primary-500 hover:underline">harungecit.dev</a>
           </p>
         </div>

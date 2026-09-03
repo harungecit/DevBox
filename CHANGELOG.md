@@ -68,4 +68,4 @@ All notable changes to DevBox are documented here. The format follows
 
 ## [0.2.1] — 2026-08-28
 
-See the [GitHub release](https://github.com/harungecit/DevBox/releases/tag/v0.2.1).
+See the [GitHub release](https://github.com/DevBox-App/DevBox/releases/tag/v0.2.1).

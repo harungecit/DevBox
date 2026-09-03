@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	Repo      = "harungecit/DevBox"
+	Repo      = "DevBox-App/DevBox"
 	latestURL = "https://api.github.com/repos/" + Repo + "/releases/latest"
 )
 

@@ -12,7 +12,7 @@ Prerequisites:
 - Windows only: **NSIS** if you want to build the installer (`wails build -nsis`)
 
 ```bash
-git clone https://github.com/harungecit/DevBox.git
+git clone https://github.com/DevBox-App/DevBox.git
 cd DevBox
 wails dev          # run with hot reload (Go backend + Vite frontend)
 ```
