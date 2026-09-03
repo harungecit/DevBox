@@ -35,6 +35,8 @@
     port: number;
     version: string;
     installed: boolean;
+    unsupported?: string; // i18n key: why it cannot be installed on this OS
+    alternative?: string; // API-compatible service offered instead
     updateVersion?: string;
     latestMajor?: string;
   }
@@ -134,6 +136,13 @@
     remaining: ServiceVariant[]; // for install rows of variant groups
   }
 
+  function isUnsupported(id: string): boolean {
+    return !!serviceStatuses[id]?.unsupported;
+  }
+  function installableVariants(vs: ServiceVariant[]): ServiceVariant[] {
+    return vs.filter(v => !isUnsupported(v.id));
+  }
+
   function categoryRows(svcs: ServiceDef[], statuses: Record<string, ServiceInfo>): ServiceRow[] {
     const rows: ServiceRow[] = [];
     for (const svc of svcs) {
@@ -144,6 +153,8 @@
       for (const v of svc.variants.filter(v => statuses[v.id]?.installed)) {
         rows.push({ svc, variant: v, remaining: [] });
       }
+      // Variants without a build for this OS (Valkey on Windows) stay visible
+      // in the install row, greyed out with the reason, but are never offered.
       const remaining = svc.variants.filter(v => !statuses[v.id]?.installed);
       if (remaining.length > 0) {
         rows.push({ svc, variant: null, remaining });
@@ -259,7 +270,7 @@
     portMessage = '';
 
     if (dialogVariants && dialogVariants.length > 0) {
-      selectedVariant = dialogVariants[0].id;
+      selectedVariant = (installableVariants(dialogVariants)[0] ?? dialogVariants[0]).id;
     } else {
       selectedVariant = svc.id;
     }
@@ -515,13 +526,27 @@
             <span class="block text-sm font-medium mb-2">{$t('services.selectEngine')}</span>
             <div class="grid gap-2" style="grid-template-columns: repeat({dialogVariants.length}, 1fr)">
               {#each dialogVariants as variant}
+                {@const unsupported = isUnsupported(variant.id)}
                 <button
-                  class="p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 {selectedVariant === variant.id ? 'border-primary-500 bg-primary-500/5' : 'border-[var(--color-border)] hover:border-primary-300'}"
-                  on:click={() => selectVariant(variant.id)}
+                  class="p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 {selectedVariant === variant.id ? 'border-primary-500 bg-primary-500/5' : 'border-[var(--color-border)] hover:border-primary-300'} {unsupported ? 'opacity-50 cursor-not-allowed' : ''}"
+                  on:click={() => { if (!unsupported) selectVariant(variant.id); }}
+                  disabled={unsupported}
+                  title={unsupported ? $t(serviceStatuses[variant.id]?.unsupported || '') : variant.name}
                 >
                   <div class="w-10 h-10">{@html serviceLogos[variant.id] || ''}</div>
                   <span class="text-xs font-bold {selectedVariant === variant.id ? 'text-primary-500' : ''}">{variant.name}</span>
+                  {#if unsupported}
+                    <span class="text-[9px] px-1 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 uppercase font-bold">{$t('services.notOnThisOS')}</span>
+                  {/if}
                 </button>
+              {/each}
+              {#each dialogVariants.filter(v => isUnsupported(v.id)) as uv}
+                <p class="col-span-full text-[11px] text-[var(--color-text-secondary)]">
+                  {$t(serviceStatuses[uv.id]?.unsupported || '')}
+                  {#if serviceStatuses[uv.id]?.alternative}
+                    <button class="text-primary-500 hover:underline ml-1" on:click={() => selectVariant(serviceStatuses[uv.id].alternative || '')}>{$t('services.useAlternative', dialogVariants.find(v => v.id === serviceStatuses[uv.id]?.alternative)?.name || serviceStatuses[uv.id].alternative || '')}</button>
+                  {/if}
+                </p>
               {/each}
             </div>
           </div>
@@ -638,6 +663,11 @@
                 <div class="truncate">
                   <h4 class="font-bold text-base">{displayName}</h4>
                   <p class="text-xs text-[var(--color-text-secondary)] mt-0.5 truncate">{$t(svc.descKey)}</p>
+                  {#each row.remaining.filter(v => isUnsupported(v.id)) as uv}
+                    <p class="text-[10px] text-amber-500 mt-0.5 truncate" title={$t(serviceStatuses[uv.id].unsupported || '')}>
+                      <span class="font-bold">{uv.name}:</span> {$t(serviceStatuses[uv.id].unsupported || '')}
+                    </p>
+                  {/each}
                 </div>
               </div>
 

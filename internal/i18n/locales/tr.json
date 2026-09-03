@@ -528,5 +528,8 @@
   "path.envDesc": "Bir eklenti çalışma zamanı genel yapıldığında kullanıcı ortamına yazılır (ör. JAVA_HOME).",
   "path.envEmpty": "Henüz yönetilen ortam değişkeni yok.",
   "projects.runtimeAuto": "Otomatik (çerçeveden)",
-  "projects.runtimeUnmanaged": "\"{0}\" DevBox tarafından yönetilmiyor — sürüm sabitlemek için Çalışma Zamanları sayfasından ekleyin."
+  "projects.runtimeUnmanaged": "\"{0}\" DevBox tarafından yönetilmiyor — sürüm sabitlemek için Çalışma Zamanları sayfasından ekleyin.",
+  "services.valkeyNoWindows": "Valkey'in henüz Windows derlemesi yok (yalnızca Linux/macOS yayımlanıyor). Redis API uyumludur ve doğrudan yerine geçer.",
+  "services.notOnThisOS": "Windows'ta yok",
+  "services.useAlternative": "Yerine {0} kullan"
 }

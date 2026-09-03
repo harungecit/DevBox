@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 type entry struct {
@@ -142,19 +144,78 @@ func TestZipStripsCommonRootOnly(t *testing.T) {
 	mustExist(t, filepath.Join(dest2, "lib", "std.zig"))
 }
 
-func TestUnsupportedAndNotArchive(t *testing.T) {
+func TestNotArchiveAndBrokenSevenZip(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "x.7z")
-	os.WriteFile(p, []byte("x"), 0644)
+	os.WriteFile(p, []byte("not really 7z"), 0644)
 	if err := Decompress(p, dir); err == nil {
-		t.Fatal("7z should be unsupported")
+		t.Fatal("garbage 7z must fail")
 	}
 	q := filepath.Join(dir, "x.msi")
 	os.WriteFile(q, []byte("x"), 0644)
 	if err := Decompress(q, dir); err != ErrNotArchive {
 		t.Fatalf("expected ErrNotArchive, got %v", err)
 	}
-	if IsArchive("a.msi") || !IsArchive("a.tar.xz") || !IsKnownArchive("a.7z") {
+	if IsArchive("a.msi") || !IsArchive("a.tar.xz") || !IsArchive("a.7z") || !IsArchive("a.tar.zst") {
 		t.Fatal("IsArchive")
 	}
+}
+
+func writeTarZst(t *testing.T, path string, entries []entry) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw, err := zstd.NewWriter(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tw := tar.NewWriter(zw)
+	for _, e := range entries {
+		h := &tar.Header{Name: e.name, Mode: 0755}
+		if e.dir {
+			h.Typeflag = tar.TypeDir
+		} else {
+			h.Typeflag = tar.TypeReg
+			h.Size = int64(len(e.content))
+		}
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if !e.dir {
+			tw.Write([]byte(e.content))
+		}
+	}
+	tw.Close()
+	zw.Close()
+	f.Close()
+}
+
+func TestTarZstStripsCommonRootOnly(t *testing.T) {
+	dir := t.TempDir()
+	rooted := filepath.Join(dir, "rooted.tar.zst")
+	writeTarZst(t, rooted, []entry{
+		{name: "pkg-1.0/", dir: true},
+		{name: "pkg-1.0/bin/tool", content: "t"},
+		{name: "pkg-1.0/README", content: "r"},
+	})
+	out := filepath.Join(dir, "out1")
+	if err := Decompress(rooted, out); err != nil {
+		t.Fatalf("Decompress: %v", err)
+	}
+	mustExist(t, filepath.Join(out, "bin", "tool"))
+	mustNotExist(t, filepath.Join(out, "pkg-1.0"))
+
+	flat := filepath.Join(dir, "flat.tar.zst")
+	writeTarZst(t, flat, []entry{
+		{name: "a.txt", content: "a"},
+		{name: "lib/b.txt", content: "b"},
+	})
+	out2 := filepath.Join(dir, "out2")
+	if err := Decompress(flat, out2); err != nil {
+		t.Fatalf("Decompress flat: %v", err)
+	}
+	mustExist(t, filepath.Join(out2, "a.txt"))
+	mustExist(t, filepath.Join(out2, "lib", "b.txt"))
 }

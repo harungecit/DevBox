@@ -328,8 +328,14 @@ func scaffoldWithCommand(tmpl *FrameworkTemplate, parentDir, projectName string,
 		cmdName = filepath.Join(binDir, platform.BinaryName("cargo"))
 		args = []string{"init", projectName}
 	case "kemal":
-		return scaffoldFilesThen(parentDir, projectName, starterKemal(projectName),
+		err := scaffoldFilesThen(parentDir, projectName, starterKemal(projectName),
 			filepath.Join(binDir, platform.BinaryName("shards")), []string{"install"}, runtimeEnv(mgr, ver), progress)
+		if err != nil && goruntime.GOOS == "windows" && shardsNeedsSymlinks {
+			// shards creates symlinks under lib/; without Developer Mode or an
+			// elevated shell Windows refuses them.
+			return fmt.Errorf("Crystal's package manager (shards) needs symlink permission on Windows: enable Developer Mode (Settings → System → For developers) and create the project again")
+		}
+		return err
 	case "django":
 		cmdName = filepath.Join(binDir, platform.BinaryName("python"))
 		args = []string{"-m", "django", "startproject", projectName}
@@ -402,8 +408,12 @@ func scaffoldFilesThen(parentDir, projectName string, files map[string]string, c
 		return fmt.Errorf("failed to start: %s", err)
 	}
 	scanner := bufio.NewScanner(stdout)
+	shardsNeedsSymlinks = false
 	for scanner.Scan() {
 		if line := strings.TrimSpace(scanner.Text()); line != "" {
+			if strings.Contains(line, "Shards needs symlinks") {
+				shardsNeedsSymlinks = true
+			}
 			progress <- ScaffoldProgress{Percent: -1, Message: line}
 		}
 	}
@@ -412,6 +422,11 @@ func scaffoldFilesThen(parentDir, projectName string, files map[string]string, c
 	}
 	return nil
 }
+
+// shardsNeedsSymlinks is set by scaffoldFilesThen when the Crystal package
+// manager reported the Windows symlink restriction (scaffold runs are
+// serialised by scaffoldMu, so a plain variable is enough).
+var shardsNeedsSymlinks bool
 
 // CloneProject clones a git repository
 func CloneProject(gitURL, parentDir, projectName string, progress chan<- ScaffoldProgress) error {

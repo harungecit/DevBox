@@ -1,7 +1,7 @@
 // Package archive extracts the archive formats vfox plugins hand DevBox,
 // replicating vfox's layout rules so that plugin EnvKeys paths stay valid:
-//   - tar.* : the first path component of every entry is dropped unconditionally
-//   - zip   : the single common root folder (if every entry shares one) is dropped
+//   - tar.gz/xz/bz2 : the first path component of every entry is dropped unconditionally
+//   - zip / 7z / tar.zst : the single common root folder (if every entry shares one) is dropped
 //
 // The strip semantics are ported from github.com/version-fox/vfox
 // internal/shared/util/decompressor.go (Apache-2.0) — see THIRD_PARTY_NOTICES.md.
@@ -21,19 +21,21 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bodgit/sevenzip"
+	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
 )
 
 // ErrNotArchive is returned by Decompress for files that are not a supported archive.
 var ErrNotArchive = errors.New("not an archive")
 
-// ErrUnsupported is returned for archive formats DevBox recognises but cannot extract yet.
-var ErrUnsupported = errors.New("archive format not supported yet")
+// ErrUnsupported is returned for archive formats DevBox recognises but cannot extract.
+var ErrUnsupported = errors.New("archive format not supported")
 
 // IsArchive reports whether the file name has an archive extension DevBox can extract.
 func IsArchive(name string) bool {
 	n := strings.ToLower(filepath.Base(name))
-	for _, s := range []string{".tar.gz", ".tgz", ".tar.xz", ".tar.bz2", ".tbz2", ".zip"} {
+	for _, s := range []string{".tar.gz", ".tgz", ".tar.xz", ".tar.bz2", ".tbz2", ".zip", ".7z", ".tar.zst", ".tzst"} {
 		if strings.HasSuffix(n, s) {
 			return true
 		}
@@ -41,11 +43,9 @@ func IsArchive(name string) bool {
 	return false
 }
 
-// IsKnownArchive is IsArchive plus the formats that are recognised but unsupported (7z, zstd).
-func IsKnownArchive(name string) bool {
-	n := strings.ToLower(filepath.Base(name))
-	return IsArchive(n) || strings.HasSuffix(n, ".7z") || strings.HasSuffix(n, ".tar.zst") || strings.HasSuffix(n, ".tzst")
-}
+// IsKnownArchive is kept for callers that distinguished recognised-but-unsupported
+// formats; every recognised format is extractable now.
+func IsKnownArchive(name string) bool { return IsArchive(name) }
 
 // Decompress extracts src into dest (created if missing).
 func Decompress(src, dest string) error {
@@ -77,11 +77,199 @@ func Decompress(src, dest string) error {
 	case strings.HasSuffix(n, ".zip"):
 		return extractZip(src, dest)
 	case strings.HasSuffix(n, ".7z"):
-		return fmt.Errorf("%w: 7z (%s)", ErrUnsupported, filepath.Base(src))
+		return extract7z(src, dest)
 	case strings.HasSuffix(n, ".tar.zst") || strings.HasSuffix(n, ".tzst"):
-		return fmt.Errorf("%w: zstd (%s)", ErrUnsupported, filepath.Base(src))
+		return extractTarZst(src, dest)
 	}
 	return ErrNotArchive
+}
+
+// commonRoot returns the single top-level folder every entry shares, or "".
+func commonRoot(names []string) string {
+	first := ""
+	for _, name := range names {
+		normalized := strings.Trim(strings.ReplaceAll(name, "\\", "/"), "/")
+		if normalized == "" || skipZipEntry(normalized) {
+			continue
+		}
+		cur := strings.Split(normalized, "/")[0]
+		if first != "" && first != cur {
+			return ""
+		}
+		if first == "" {
+			first = cur
+		}
+	}
+	return first
+}
+
+// stripRoot drops the common root folder from an entry name.
+func stripRoot(name, rootFolder string) string {
+	normalized := strings.Trim(strings.ReplaceAll(name, "\\", "/"), "/")
+	if rootFolder != "" && normalized == rootFolder {
+		return "" // the root folder entry itself
+	}
+	parts := strings.Split(normalized, "/")
+	if len(parts) > 1 && rootFolder != "" && parts[0] == rootFolder {
+		parts = parts[1:]
+	}
+	return strings.Join(parts, "/")
+}
+
+// extractTarZst mirrors vfox's zstd handling: the common root folder (not
+// blindly the first component) is stripped.
+func extractTarZst(src, dest string) error {
+	// Pass 1: find the common root.
+	var names []string
+	if err := walkTarZst(src, func(h *tar.Header, _ *tar.Reader) error {
+		names = append(names, h.Name)
+		return nil
+	}); err != nil {
+		return err
+	}
+	rootFolder := commonRoot(names)
+	var links []link
+	err := walkTarZst(src, func(header *tar.Header, tr *tar.Reader) error {
+		target, err := safeTarget(dest, stripRoot(header.Name, rootFolder))
+		if err != nil {
+			return err
+		}
+		if target == "" {
+			return nil
+		}
+		switch header.Typeflag {
+		case tar.TypeDir:
+			return os.MkdirAll(target, 0755)
+		case tar.TypeReg, tar.TypeRegA:
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return err
+			}
+			mode := os.FileMode(header.Mode) & os.ModePerm
+			if mode == 0 {
+				mode = 0644
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				return err
+			}
+			return f.Close()
+		case tar.TypeSymlink:
+			links = append(links, link{target: header.Linkname, name: target})
+		case tar.TypeLink:
+			lt, err := safeTarget(dest, stripRoot(header.Linkname, rootFolder))
+			if err != nil {
+				return err
+			}
+			links = append(links, link{target: lt, name: target, hard: true})
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return createLinks(dest, links)
+}
+
+func walkTarZst(src string, fn func(*tar.Header, *tar.Reader) error) error {
+	file, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	zr, err := zstd.NewReader(file)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+	tr := tar.NewReader(zr)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if header == nil {
+			continue
+		}
+		if err := fn(header, tr); err != nil {
+			return err
+		}
+	}
+}
+
+// extract7z uses the same common-root rule as zip.
+func extract7z(src, dest string) error {
+	r, err := sevenzip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	names := make([]string, 0, len(r.File))
+	for _, f := range r.File {
+		names = append(names, f.Name)
+	}
+	rootFolder := commonRoot(names)
+	var links []link
+	for _, f := range r.File {
+		normalized := strings.ReplaceAll(f.Name, "\\", "/")
+		if skipZipEntry(normalized) {
+			continue
+		}
+		fname := stripRoot(normalized, rootFolder)
+		target, err := safeTarget(dest, fname)
+		if err != nil {
+			return err
+		}
+		if target == "" {
+			continue
+		}
+		if f.FileInfo().IsDir() || strings.HasSuffix(normalized, "/") {
+			if err := os.MkdirAll(target, 0755); err != nil {
+				return err
+			}
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		if f.FileInfo().Mode()&os.ModeSymlink != 0 {
+			buf := new(bytes.Buffer)
+			_, err := io.Copy(buf, rc)
+			rc.Close()
+			if err != nil {
+				return fmt.Errorf("%s: reading symlink target: %v", f.Name, err)
+			}
+			links = append(links, link{target: strings.TrimSpace(buf.String()), name: target})
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			rc.Close()
+			return err
+		}
+		mode := f.Mode() & os.ModePerm
+		if mode == 0 {
+			mode = 0644
+		}
+		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+		if err != nil {
+			rc.Close()
+			return err
+		}
+		_, err = io.Copy(out, rc)
+		rc.Close()
+		out.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return createLinks(dest, links)
 }
 
 type link struct {

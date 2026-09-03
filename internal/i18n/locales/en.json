@@ -528,5 +528,8 @@
   "path.envDesc": "Written to your user environment when a plugin runtime is set global (e.g. JAVA_HOME).",
   "path.envEmpty": "No environment variables are managed yet.",
   "projects.runtimeAuto": "Auto (from framework)",
-  "projects.runtimeUnmanaged": "\"{0}\" is not managed by DevBox — add it from the Runtimes page to pin versions."
+  "projects.runtimeUnmanaged": "\"{0}\" is not managed by DevBox — add it from the Runtimes page to pin versions.",
+  "services.valkeyNoWindows": "Valkey has no Windows build yet (upstream ships Linux/macOS only). Redis is API-compatible and works as a drop-in replacement.",
+  "services.notOnThisOS": "not on Windows",
+  "services.useAlternative": "Use {0} instead"
 }

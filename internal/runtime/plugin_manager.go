@@ -545,6 +545,55 @@ func (m *PluginManager) materialise(item *vfox.PreInstallPackageItem, itemDir, t
 	}
 }
 
+// sidecarEnvFile is where the env of an imported (linked) version lives:
+// <runtimes>/<plugin>/<version>.devbox-env.json — outside the link target.
+func (m *PluginManager) sidecarEnvFile(version string) string {
+	return filepath.Join(runtimeBaseDir(m.name), version+"."+envFileName)
+}
+
+// WriteImportedEnv records the environment of an external installation that
+// was linked/copied to rootDir (Import Center), using the plugin's EnvKeys hook
+// with the installation root as the main package path.
+func (m *PluginManager) WriteImportedEnv(version, rootDir string) error {
+	main := &vfox.InstalledPackageItem{Name: m.name, Version: version, Path: rootDir}
+	sdkInfo := map[string]*vfox.InstalledPackageItem{m.name: main}
+	keys, err := m.p.EnvKeys(&vfox.EnvKeysHookCtx{Main: main, Path: rootDir, SdkInfo: sdkInfo})
+	if err != nil {
+		return err
+	}
+	env := &versionEnv{Plugin: m.name, PluginVersion: m.rec.Version, Version: version, Main: main, SdkInfo: sdkInfo, Vars: map[string]string{}, InstalledAt: time.Now().UTC().Format(time.RFC3339)}
+	seen := map[string]bool{}
+	for _, k := range keys {
+		if k == nil {
+			continue
+		}
+		if strings.EqualFold(k.Key, "PATH") {
+			p := filepath.Clean(k.Value)
+			if !seen[strings.ToLower(p)] {
+				seen[strings.ToLower(p)] = true
+				env.Paths = append(env.Paths, p)
+			}
+			continue
+		}
+		env.Vars[k.Key] = k.Value
+	}
+	if len(env.Paths) == 0 {
+		if bin := PluginBinaryInRoot(m.name, rootDir); bin != "" {
+			env.Paths = []string{filepath.Dir(bin)}
+		} else {
+			env.Paths = []string{rootDir}
+		}
+	}
+	data, _ := json.MarshalIndent(env, "", "  ")
+	if err := os.WriteFile(m.sidecarEnvFile(version), data, 0644); err != nil {
+		return err
+	}
+	m.envMu.Lock()
+	m.envCache[version] = env
+	m.envMu.Unlock()
+	return nil
+}
+
 func (m *PluginManager) readEnv(version string) *versionEnv {
 	m.envMu.Lock()
 	defer m.envMu.Unlock()
@@ -552,6 +601,9 @@ func (m *PluginManager) readEnv(version string) *versionEnv {
 		return e
 	}
 	data, err := os.ReadFile(filepath.Join(m.versionDir(version), envFileName))
+	if err != nil {
+		data, err = os.ReadFile(m.sidecarEnvFile(version))
+	}
 	if err != nil {
 		return nil
 	}
@@ -610,6 +662,10 @@ func (m *PluginManager) BinaryPath(version string) string {
 	if e := m.readEnv(version); e != nil && len(e.Paths) > 0 {
 		return e.Paths[0]
 	}
+	// No env record: an imported root without a sidecar, or the vfox layout.
+	if bin := PluginBinaryInRoot(m.name, m.versionDir(version)); bin != "" {
+		return filepath.Dir(bin)
+	}
 	if goruntime.GOOS == "windows" {
 		return m.mainDir(version)
 	}
@@ -636,6 +692,7 @@ func (m *PluginManager) Uninstall(version string) error {
 		config.Save()
 	}
 	m.forgetEnv(version)
+	os.Remove(m.sidecarEnvFile(version))
 	return uninstallVersion(m.name, version)
 }
 

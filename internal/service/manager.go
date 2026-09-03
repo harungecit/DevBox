@@ -56,6 +56,20 @@ type ServiceInfo struct {
 	UpdateVersion string `json:"updateVersion"`
 	// LatestMajor is a newer release line that needs a fresh install; "" if none.
 	LatestMajor string `json:"latestMajor"`
+	// Unsupported is an i18n key explaining why the service cannot be installed
+	// on this OS (e.g. Valkey on Windows); "" when installable.
+	Unsupported string `json:"unsupported,omitempty"`
+	// Alternative names an API-compatible service DevBox offers instead.
+	Alternative string `json:"alternative,omitempty"`
+}
+
+// unsupportedHere lists services known to DevBox that have no build for this
+// OS, so the UI can explain instead of offering a broken install.
+var unsupportedHere = map[string]ServiceInfo{}
+
+// MarkUnsupported records a service that is skipped on this OS.
+func MarkUnsupported(name, displayName, reasonKey, alternative string) {
+	unsupportedHere[name] = ServiceInfo{Name: name, DisplayName: displayName, Status: StatusNotInstalled, Unsupported: reasonKey, Alternative: alternative}
 }
 
 // ServiceManager defines the interface for managing services
@@ -141,6 +155,8 @@ func InitAll() {
 	// Redis is API-compatible and registered above as the Windows alternative.
 	if goruntime.GOOS != "windows" {
 		Register(NewValkeyManager())
+	} else {
+		MarkUnsupported("valkey", "Valkey", "services.valkeyNoWindows", "redis")
 	}
 	// Mail
 	Register(NewMailpitManager())
@@ -171,6 +187,11 @@ func GetAll() map[string]ServiceInfo {
 			info.LatestMajor = u.LatestMajor
 		}
 		result[name] = info
+	}
+	for name, info := range unsupportedHere {
+		if _, ok := result[name]; !ok {
+			result[name] = info
+		}
 	}
 	return result
 }

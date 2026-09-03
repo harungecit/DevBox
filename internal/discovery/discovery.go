@@ -208,10 +208,25 @@ func isPharFile(p string) bool {
 	return strings.Contains(string(head[:n]), "<?php")
 }
 
+// pluginRuntimeSpecs builds probe specs for every registered plugin runtime
+// (java, ruby, deno…) so the Import Center can find their installations too.
+func pluginRuntimeSpecs() []runtimeSpec {
+	var out []runtimeSpec
+	for _, name := range runtime.Names() {
+		if !runtime.IsPluginRuntime(name) {
+			continue
+		}
+		p := runtime.ProbeFor(name)
+		out = append(out, runtimeSpec{name: name, display: runtime.DisplayName(name), exe: p.Exe, verArgs: p.VerArgs, verRe: p.VerRe})
+	}
+	return out
+}
+
 // ScanRuntimes finds external runtime installations.
 func ScanRuntimes() []Found {
 	var out []Found
-	for _, spec := range runtimeSpecs {
+	specs := append(append([]runtimeSpec{}, runtimeSpecs...), pluginRuntimeSpecs()...)
+	for _, spec := range specs {
 		roots := map[string]bool{}
 
 		// PATH hits
@@ -370,6 +385,9 @@ func probeService(spec serviceSpec, root string) (Found, bool) {
 // the DevBox managers expect: on Windows node/php/python keep the binary at
 // the root, go/rust under bin/; on macOS everything is under bin/.
 func runtimeExeInRoot(name, root, exe string) string {
+	if runtime.IsPluginRuntime(name) {
+		return runtime.PluginBinaryInRoot(name, root)
+	}
 	var cand string
 	if goruntime.GOOS == "windows" {
 		switch name {

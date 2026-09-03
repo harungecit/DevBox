@@ -64,6 +64,10 @@ func ImportExternal(name, srcRoot, version string, progress chan<- Progress) err
 			os.RemoveAll(destDir)
 			return fmt.Errorf("import verification failed: binary not reachable through the link")
 		}
+		if err := finalizeImportedPlugin(name, version, destDir, report); err != nil {
+			os.RemoveAll(destDir)
+			return err
+		}
 		report(100, fmt.Sprintf("%s %s is now managed by DevBox (in place — nothing was moved)", name, version))
 		return nil
 	} else {
@@ -88,10 +92,28 @@ func ImportExternal(name, srcRoot, version string, progress chan<- Progress) err
 		finalizeImportedPHP(destDir, version, report)
 	case "python":
 		finalizeImportedPython(destDir, report)
+	default:
+		if err := finalizeImportedPlugin(name, version, destDir, report); err != nil {
+			os.RemoveAll(destDir)
+			return err
+		}
 	}
 
 	report(100, fmt.Sprintf("%s %s imported", name, version))
 	return nil
+}
+
+// finalizeImportedPlugin asks the plugin which PATH dirs and variables an
+// installation rooted at destDir needs (EnvKeys) and records them next to the
+// version dir — never inside it, because a linked import points at a
+// directory DevBox does not own.
+func finalizeImportedPlugin(name, version, destDir string, report func(int, string)) error {
+	pm, err := PluginManagerFor(name)
+	if err != nil {
+		return nil // built-in runtime: nothing to do
+	}
+	report(92, "Reading environment from the plugin...")
+	return pm.WriteImportedEnv(version, destDir)
 }
 
 // importedRuntimeBinary returns the runtime's main binary inside a root using
@@ -102,6 +124,9 @@ func importedRuntimeBinary(name, root string) string {
 		"node": "node", "go": "go", "php": "php", "python": "python", "rust": "rustc",
 	}[name]
 	if exe == "" {
+		if IsPluginRuntime(name) {
+			return PluginBinaryInRoot(name, root)
+		}
 		return ""
 	}
 	var cand string
