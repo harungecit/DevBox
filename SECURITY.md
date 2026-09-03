@@ -43,4 +43,4 @@ published `SHA256SUMS-windows.txt` on each release manually.
 
 DevBox sends no telemetry. The only network requests are the downloads you
 trigger and version/update checks. See the
-[privacy policy](https://devbox.harungecit.dev/privacy.html).
+[privacy policy](https://devboxapp.com/privacy.html).

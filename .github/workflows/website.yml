@@ -1,10 +1,11 @@
-# Publishes docs/ to Cloudflare Pages at https://devbox.harungecit.dev
+# Publishes docs/ to Cloudflare Pages at https://devboxapp.com (www. and the
+# old devbox.harungecit.dev hostname stay attached and 301-redirect via docs/_redirects)
 #
 # One-time setup (repository → Settings → Secrets and variables → Actions):
 #   CLOUDFLARE_ACCOUNT_ID  Cloudflare dashboard → right sidebar → Account ID
 #   CLOUDFLARE_API_TOKEN   API token with permissions:
 #                            Account · Cloudflare Pages · Edit
-#                            Zone    · DNS              · Edit   (zone: harungecit.dev)
+#                            Zone    · DNS              · Edit   (zones: devboxapp.com, harungecit.dev)
 # Everything else — creating the Pages project, attaching the custom domain,
 # the CNAME record — is done here and is safe to re-run.
 
@@ -21,8 +22,11 @@ permissions:
 
 env:
   PROJECT: devbox
-  DOMAIN: devbox.harungecit.dev
-  ZONE: harungecit.dev
+  DOMAIN: devboxapp.com
+  ZONE: devboxapp.com
+  # Extra hostnames served by the same project: www + the previous address.
+  # docs/_redirects sends both to https://devboxapp.com with a 301.
+  EXTRA_DOMAINS: www.devboxapp.com devbox.harungecit.dev
   PAGES_HOST: devbox-6vu.pages.dev   # wrangler assigned this subdomain
 
 jobs:
@@ -54,18 +58,24 @@ jobs:
           set -e
           api() { curl -sS -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" "$@"; }
 
-          # 1) Custom domain on the Pages project
-          if ! api "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/pages/projects/$PROJECT/domains" | jq -e --arg d "$DOMAIN" '.result[]? | select(.name==$d)' >/dev/null; then
-            api -X POST "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/pages/projects/$PROJECT/domains" --data "{\"name\":\"$DOMAIN\"}" | jq -e .success >/dev/null
-            echo "attached $DOMAIN to Pages project"
-          fi
+          # 1) Custom domains on the Pages project (apex, www, previous hostname)
+          for d in $DOMAIN $EXTRA_DOMAINS; do
+            if ! api "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/pages/projects/$PROJECT/domains" | jq -e --arg d "$d" '.result[]? | select(.name==$d)' >/dev/null; then
+              api -X POST "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/pages/projects/$PROJECT/domains" --data "{\"name\":\"$d\"}" | jq -e .success >/dev/null
+              echo "attached $d to Pages project"
+            fi
+          done
 
-          # 2) CNAME devbox → devbox.pages.dev (proxied)
+          # 2) DNS in the devboxapp.com zone: apex CNAME (flattened by Cloudflare) + www, both proxied.
+          #    The zone must already exist in this Cloudflare account (register the
+          #    domain or point its nameservers at Cloudflare first).
           ZONE_ID=$(api "https://api.cloudflare.com/client/v4/zones?name=$ZONE" | jq -r '.result[0].id')
-          [ "$ZONE_ID" != "null" ] || { echo "::error::zone $ZONE not visible to this token"; exit 1; }
-          if ! api "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$DOMAIN" | jq -e '.result | length > 0' >/dev/null; then
-            api -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
-              --data "{\"type\":\"CNAME\",\"name\":\"$DOMAIN\",\"content\":\"$PAGES_HOST\",\"proxied\":true,\"ttl\":1,\"comment\":\"DevBox website (Cloudflare Pages)\"}" | jq -e .success >/dev/null
-            echo "created CNAME $DOMAIN → $PAGES_HOST"
-          fi
+          [ "$ZONE_ID" != "null" ] || { echo "::error::zone $ZONE not visible to this token — add devboxapp.com to Cloudflare and give the token Zone·DNS·Edit on it"; exit 1; }
+          for name in $DOMAIN www.$DOMAIN; do
+            if ! api "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$name" | jq -e '.result | length > 0' >/dev/null; then
+              api -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
+                --data "{\"type\":\"CNAME\",\"name\":\"$name\",\"content\":\"$PAGES_HOST\",\"proxied\":true,\"ttl\":1,\"comment\":\"DevBox website (Cloudflare Pages)\"}" | jq -e .success >/dev/null
+              echo "created CNAME $name → $PAGES_HOST"
+            fi
+          done
           echo "Site: https://$DOMAIN"

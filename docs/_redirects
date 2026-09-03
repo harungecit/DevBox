@@ -1,0 +1,3 @@
+# Everything but the apex redirects to https://devboxapp.com
+https://www.devboxapp.com/* https://devboxapp.com/:splat 301
+https://devbox.harungecit.dev/* https://devboxapp.com/:splat 301

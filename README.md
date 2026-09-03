@@ -14,7 +14,7 @@ Runtimes · databases · web servers · <code>.test</code> domains · SSL · pub
 
 <p align="center">
   <a href="https://github.com/harungecit/DevBox/releases/latest"><b>⬇ Download</b></a> ·
-  <a href="https://devbox.harungecit.dev/">Website</a> ·
+  <a href="https://devboxapp.com/">Website</a> ·
   <a href="#getting-started">Getting started</a> ·
   <a href="#what-you-get">What you get</a> ·
   <a href="#supported-stack">Supported stack</a> ·
@@ -48,7 +48,7 @@ Everything lives in a single folder (`C:\DevBox`), and DevBox sends no telemetry
 
 Need a public link for a client or a webhook? Click the **share** icon on a project — you get a `*.trycloudflare.com` URL in seconds. Link your Cloudflare account in **Settings** to use your own domain instead.
 
-Full walkthrough with screenshots: <https://devbox.harungecit.dev/#usage>
+Full walkthrough with screenshots: <https://devboxapp.com/#usage>
 
 ## What you get
 
@@ -157,7 +157,7 @@ Uninstalling DevBox leaves this folder — and your data — untouched.
 
 **Why does SmartScreen warn me?** DevBox is not yet signed with a paid code-signing certificate. Every release is built publicly by GitHub Actions from the tagged source and ships with a `SHA256SUMS` file you can verify.
 
-**Does it phone home?** No telemetry. The only network requests are the downloads you trigger and the update/version checks — see the [privacy policy](https://devbox.harungecit.dev/privacy.html).
+**Does it phone home?** No telemetry. The only network requests are the downloads you trigger and the update/version checks — see the [privacy policy](https://devboxapp.com/privacy.html).
 
 ## Contributing
 
