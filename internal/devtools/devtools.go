@@ -48,6 +48,9 @@ type Tool struct {
 	Bin      string `json:"bin"`      // executable name (without extension)
 	Desc     string `json:"desc"`     // i18n key
 	Homepage string `json:"homepage"` // docs link
+	// verArgs overrides the version probe args (default ["--version"]); some
+	// CLIs print their version through a subcommand instead (e.g. `wails version`).
+	verArgs []string
 	// Web tools
 	Port        int      `json:"port"`        // fixed loopback port of the UI
 	ForServices []string `json:"forServices"` // services this UI manages (first installed one is used)
@@ -104,7 +107,9 @@ var Catalog = []Tool{
 		Pkg: "github.com/golangci/golangci-lint/v2/cmd/golangci-lint", Bin: "golangci-lint",
 		Desc: "tools.golangciDesc", Homepage: "https://golangci-lint.run/"},
 	{ID: "gopls", Name: "gopls", Group: "go", Runtime: "go", Kind: KindGo, Pkg: "golang.org/x/tools/gopls", Bin: "gopls",
-		Desc: "tools.goplsDesc", Homepage: "https://pkg.go.dev/golang.org/x/tools/gopls"},
+		Desc: "tools.goplsDesc", Homepage: "https://pkg.go.dev/golang.org/x/tools/gopls", verArgs: []string{"version"}},
+	{ID: "wails", Name: "Wails", Group: "go", Runtime: "go", Kind: KindGo, Pkg: "github.com/wailsapp/wails/v2/cmd/wails", Bin: "wails",
+		Desc: "tools.wailsDesc", Homepage: "https://wails.io/", verArgs: []string{"version"}},
 
 	// ---- Rust ----
 	{ID: "cargo-watch", Name: "cargo-watch", Group: "rust", Runtime: "rust", Kind: KindCargo, Pkg: "cargo-watch", Bin: "cargo-watch",
@@ -252,7 +257,11 @@ func version(t *Tool) string {
 			}
 		}
 	default:
-		cmd := exec.Command(BinPath(t), "--version")
+		args := t.verArgs
+		if len(args) == 0 {
+			args = []string{"--version"}
+		}
+		cmd := exec.Command(BinPath(t), args...)
 		platform.SetProcessAttrs(cmd, false, true)
 		if out, err := cmd.CombinedOutput(); err == nil {
 			v = versionRe.FindString(string(out))

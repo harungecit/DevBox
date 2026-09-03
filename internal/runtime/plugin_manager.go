@@ -221,9 +221,9 @@ func (m *PluginManager) cleanupInstalling() {
 	}
 }
 
-// stableFromNote derives Version.Stable the way the UI expects: when the
-// plugin annotates versions ("LTS", "stable"…) trust the note, otherwise sniff
-// the version string for pre-release markers.
+// stableFromNote derives Version.Stable the way the UI expects: an explicit
+// "LTS"/"stable" note wins, a note naming a pre-release channel ("dev",
+// "nightly", "rc"…) loses, anything else is decided by the version string.
 func stableFromNote(items []*vfox.AvailableHookResultItem) func(*vfox.AvailableHookResultItem) bool {
 	hasNotes := false
 	for _, it := range items {
@@ -232,16 +232,20 @@ func stableFromNote(items []*vfox.AvailableHookResultItem) func(*vfox.AvailableH
 			break
 		}
 	}
+	unstableWords := []string{"dev", "nightly", "beta", "rc", "alpha", "preview", "master", "canary", "unstable", "snapshot", "ea"}
 	return func(it *vfox.AvailableHookResultItem) bool {
-		if hasNotes {
-			n := strings.ToLower(it.Note)
-			if strings.Contains(n, "lts") || strings.Contains(n, "stable") || strings.Contains(n, "latest") {
+		n := strings.ToLower(strings.TrimSpace(it.Note))
+		if hasNotes && n != "" {
+			if strings.Contains(n, "lts") || strings.Contains(n, "stable") {
 				return true
 			}
-			if n == "" {
-				return !vfox.IsPreRelease(it.Version)
+			for _, w := range unstableWords {
+				if strings.Contains(n, w) {
+					return false
+				}
 			}
-			return false
+			// Any other note ("latest", "release", vendor names…) says nothing
+			// about stability — fall through to the version string.
 		}
 		return !vfox.IsPreRelease(it.Version)
 	}

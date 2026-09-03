@@ -8,13 +8,15 @@
   "frontend:dev:serverUrl": "auto",
   "author": {
     "name": "Harun Geçit",
-    "email": "harungecit@gmail.com"
+    "email": "info@harungecit.com",
+    "web": "https://harungecit.dev"
   },
   "info": {
     "companyName": "Harun Geçit",
     "productName": "DevBox",
     "productVersion": "0.4.1",
     "copyright": "Copyright © 2026 Harun Geçit",
-    "comments": "Local development environment manager"
+    "comments": "Local development environment manager",
+    "support": "https://devbox.harungecit.dev"
   }
 }
