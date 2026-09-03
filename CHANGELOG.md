@@ -3,6 +3,29 @@
 All notable changes to DevBox are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [0.5.0] — 2026-09-03
+
+### Added
+- **Any language via vfox plugins.** DevBox now runs [vfox](https://vfox.dev) plugins inside the app: Java (Temurin, Zulu, Corretto, GraalVM, Liberica…), .NET, Ruby, Deno, Bun, Dart, Flutter, Kotlin, Scala, Groovy, Elixir, Erlang, Julia, Crystal, Zig, V, Lua, Typst plus tools such as Gradle, Maven, CMake, Terraform, kubectl and 20+ more. **Runtimes → Add runtime** opens the registry catalog; each plugin becomes a normal runtime tab with the same install / pin / global workflow. Variables like `JAVA_HOME` are written to your user environment when a version is made global and listed on the Path page. The five built-in runtimes stay as they are; their vfox counterparts are marked "built in". Plugins can also be installed from a zip/manifest/GitHub URL or a local folder, updated and removed in place.
+- **Plugin runtimes everywhere:** project runtime pinning, project and service terminals, dev servers and scaffold commands all receive the plugin's PATH entries and variables; `.nvmrc` / `.java-version`-style files pre-fill the pinned version when a project is added; the Import Center finds external installations of plugin runtimes too.
+- **Kemal (Crystal) support.** Kemal apps are detected from `shard.yml`, get the right dev-server command, and a **New project → Kemal** template is offered once the Crystal plugin is installed (plain Crystal projects are recognised as well).
+- Version lists on the Runtimes page have a filter box and a "stable only" toggle — plugin lists can run into hundreds of versions.
+- Logos for 36 popular plugin runtimes and a generated badge for the rest.
+- 7z and zstd archives are supported for plugin downloads.
+- README and website list every supported language, framework, service and tool with links.
+
+### Changed
+- **New home:** the repository moved to the [DevBox-App](https://github.com/DevBox-App) organization and the website to its own repository and domain, **https://devboxapp.com** (the old address redirects). The in-app updater, badges and links follow.
+- The Windows installer now installs into `Program Files\DevBox` instead of a publisher folder; existing installations keep their folder on update.
+- Valkey on Windows: instead of a failing install, the Services page explains that no Windows build exists upstream and offers Redis (API-compatible) with one click.
+- Wails updated to 2.15.
+
+- Composer: a system-wide Composer found by the Import Center is linked in place, updates are checked against getcomposer.org, and **Update** runs `self-update`.
+
+### Fixed
+- `corepack enable` failed with "not found: corepack" on some setups; the install directory and Node PATH are now passed explicitly.
+- Plugin version lists no longer mark pre-release builds as stable when a plugin annotates only some versions.
+
 ## [0.4.1] — 2026-08-31
 
 ### Fixed

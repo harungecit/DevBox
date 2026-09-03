@@ -14,9 +14,9 @@
   "info": {
     "companyName": "Harun Geçit",
     "productName": "DevBox",
-    "productVersion": "0.4.1",
+    "productVersion": "0.5.0",
     "copyright": "Copyright © 2026 Harun Geçit",
     "comments": "Local development environment manager",
-    "support": "https://devbox.harungecit.dev"
+    "support": "https://devboxapp.com"
   }
 }
