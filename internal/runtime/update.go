@@ -15,7 +15,7 @@ import (
 // MigrateVersionData carries per-version state from an old install to the
 // freshly installed replacement so an in-place update feels like an update
 // rather than a fresh install:
-//   - PHP: php.ini (extension toggles + ini edits) and Composer
+//   - PHP: php.ini (extension toggles + ini edits); Composer lives in tools/composer
 //   - Node: corepack-enabled yarn/pnpm shims and globally installed packages
 //   - Python: pip packages (freeze → install)
 //
@@ -51,19 +51,6 @@ func migratePHP(oldDir, newDir, to string, report func(string)) {
 			pruneMissingExtensions(newDir)
 			EnableCommonExtensions(to)
 		}
-	}
-	for _, f := range []string{"composer.phar", "composer.bat", "composer"} {
-		src := filepath.Join(oldDir, f)
-		if data, err := os.ReadFile(src); err == nil {
-			mode := os.FileMode(0644)
-			if f == "composer" {
-				mode = 0755
-			}
-			os.WriteFile(filepath.Join(newDir, f), data, mode)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(newDir, "composer.phar")); err == nil {
-		report("Carried over Composer")
 	}
 }
 

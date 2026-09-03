@@ -229,6 +229,10 @@
   "tools.pnpmDesc": "Verimli, disk tasarruflu paket yöneticisi (corepack üzerinden)",
   "tools.bunDesc": "Hepsi bir arada runtime ve toolkit (ayrı binary)",
   "tools.composerNeedsPhp": "Aktif bir PHP sürümü gerektirir",
+  "tools.labelImported": "İçe aktarıldı",
+  "tools.latestVersion": "en yeni {0}",
+  "tools.unlink": "Bağlantıyı kaldır (sistemdeki kurulum olduğu yerde kalır)",
+  "tools.composerImportedHint": "Sistemdeki Composer, aktif PHP ile yerinde kullanılıyor",
   "tools.pkgMgrsNeedNode": "Aktif bir Node.js sürümü gerektirir",
 
   "dashboard.proxyTitle": "Ön kapı",
@@ -470,5 +474,7 @@
   "discovery.importing": "Aktarılıyor...",
   "discovery.importHint": "Bu kurulumu DevBox'tan yönet — yerinde, hiçbir şey taşınmaz",
   "discovery.conflictHint": "{0} zaten kurulu — önce onu kaldırın",
+  "discovery.tools": "Araçlar",
+  "discovery.toolsNote": "Araçlar oldukları yerde kullanılır — DevBox yalnızca aktif PHP ile çalıştıran bir başlatıcı ekler.",
   "discovery.empty": "Dışarıdan kurulmuş bir şey bulunamadı. Bu bilgisayardaki her şey ya zaten DevBox yönetiminde ya da kurulu değil."
 }

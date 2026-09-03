@@ -90,6 +90,10 @@ export function GetCloudflareStatus() {
   return window['go']['main']['App']['GetCloudflareStatus']();
 }
 
+export function GetComposerInfo() {
+  return window['go']['main']['App']['GetComposerInfo']();
+}
+
 export function GetComposerVersion() {
   return window['go']['main']['App']['GetComposerVersion']();
 }
@@ -256,6 +260,10 @@ export function ImportExternalRuntime(arg1, arg2, arg3) {
 
 export function ImportExternalService(arg1, arg2, arg3) {
   return window['go']['main']['App']['ImportExternalService'](arg1, arg2, arg3);
+}
+
+export function ImportExternalTool(arg1, arg2) {
+  return window['go']['main']['App']['ImportExternalTool'](arg1, arg2);
 }
 
 export function InstallAdminer() {
@@ -590,6 +598,10 @@ export function UninstallBun() {
   return window['go']['main']['App']['UninstallBun']();
 }
 
+export function UninstallComposer() {
+  return window['go']['main']['App']['UninstallComposer']();
+}
+
 export function UninstallDevTool(arg1) {
   return window['go']['main']['App']['UninstallDevTool'](arg1);
 }
@@ -608,6 +620,10 @@ export function UninstallRuntime(arg1, arg2) {
 
 export function UninstallService(arg1) {
   return window['go']['main']['App']['UninstallService'](arg1);
+}
+
+export function UpdateComposer() {
+  return window['go']['main']['App']['UpdateComposer']();
 }
 
 export function UpdateNpm() {

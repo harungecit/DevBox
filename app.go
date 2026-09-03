@@ -159,6 +159,12 @@ func (a *App) startup(ctx context.Context) {
 	runtime.InitAll()
 	service.InitAll()
 
+	// Composer used to live inside the active PHP directory; it now has its
+	// own tools/composer dir so switching PHP versions never loses it.
+	if runtime.MigrateLegacyComposer() {
+		pathenv.AddToPath(runtime.ComposerDir())
+	}
+
 	// Keep the OS login entry in sync with the executable's current location
 	// (installer upgrades move it; a stale entry silently breaks autostart).
 	if cfg.AutoStart {
@@ -1675,6 +1681,12 @@ func (a *App) IsComposerInstalled() bool {
 	return runtime.IsComposerInstalled()
 }
 
+// GetComposerInfo returns installed/imported state, version and the newest
+// stable release (cached) so the Tools page can show an update badge.
+func (a *App) GetComposerInfo() runtime.ComposerInfo {
+	return runtime.GetComposerInfo()
+}
+
 // InstallComposer downloads and installs Composer
 func (a *App) InstallComposer() error {
 	go func() {
@@ -1697,8 +1709,34 @@ func (a *App) InstallComposer() error {
 			})
 			return
 		}
+		pathenv.AddToPath(runtime.ComposerDir())
+		invalidateDiscoveryCache()
 		wailsRuntime.EventsEmit(a.ctx, "composer:installed", map[string]interface{}{})
 	}()
+	return nil
+}
+
+// UpdateComposer runs `composer self-update` (managed and imported installs
+// alike). Emits composer:updated / composer:error.
+func (a *App) UpdateComposer() error {
+	go func() {
+		if err := runtime.UpdateComposer(); err != nil {
+			wailsRuntime.EventsEmit(a.ctx, "composer:error", map[string]interface{}{"error": err.Error()})
+			return
+		}
+		wailsRuntime.EventsEmit(a.ctx, "composer:updated", runtime.GetComposerInfo())
+	}()
+	return nil
+}
+
+// UninstallComposer removes DevBox's Composer (for an imported one only the
+// link — the system phar stays where it is).
+func (a *App) UninstallComposer() error {
+	pathenv.RemoveFromPath(runtime.ComposerDir())
+	if err := runtime.UninstallComposer(); err != nil {
+		return err
+	}
+	invalidateDiscoveryCache()
 	return nil
 }
 

@@ -2,7 +2,7 @@
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { t } from '../i18n/index';
   import { runtimeLogos, serviceLogos } from '../logos';
-  import { ScanExternalSoftware, ImportExternalRuntime, ImportExternalService } from '../../../wailsjs/go/main/App';
+  import { ScanExternalSoftware, ImportExternalRuntime, ImportExternalService, ImportExternalTool } from '../../../wailsjs/go/main/App';
   import { EventsOn } from '../../../wailsjs/runtime/runtime';
   import { startRuntimeInstall, clearRuntimeInstall, startServiceInstall, clearServiceInstall } from '../stores/installs';
 
@@ -26,6 +26,7 @@
 
   $: runtimes = items.filter(i => i.kind === 'runtime');
   $: services = items.filter(i => i.kind === 'service');
+  $: tools = items.filter(i => i.kind === 'tool');
 
   // First open triggers a scan; later opens reuse the backend's short cache.
   $: if (open && !scanned && !scanning) scan(false);
@@ -54,6 +55,11 @@
       if (f.kind === 'runtime') {
         startRuntimeInstall(f.name, f.version, true);
         await ImportExternalRuntime(f.name, f.path, f.version);
+      } else if (f.kind === 'tool') {
+        // Tools link synchronously; the composer:installed event refreshes the list.
+        await ImportExternalTool(f.name, f.path);
+        importing = '';
+        if (scanned) scan(false);
       } else {
         startServiceInstall(f.name, '', true);
         await ImportExternalService(f.name, f.path, f.version);
@@ -61,7 +67,7 @@
     } catch (e: any) {
       error = `${f.displayName}: ${typeof e === 'string' ? e : e?.message || e}`;
       if (f.kind === 'runtime') clearRuntimeInstall(f.name);
-      else clearServiceInstall(f.name);
+      else if (f.kind === 'service') clearServiceInstall(f.name);
       importing = '';
     }
   }
@@ -95,6 +101,7 @@
   }
 
   function logoFor(f: Found): string {
+    if (f.kind === 'tool') return '';
     return (f.kind === 'runtime' ? runtimeLogos[f.name] : serviceLogos[f.name]) || '';
   }
 </script>
@@ -196,6 +203,44 @@
                       on:click={() => doImport(f)}
                       disabled={importing !== '' || f.conflict !== ''}
                       title={f.conflict ? $t('discovery.conflictHint', f.conflict) : $t('discovery.importHint')}
+                    >
+                      {#if importing === keyOf(f)}
+                        <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-1"></div>
+                        {$t('discovery.importing')}
+                      {:else}
+                        {$t('discovery.import')}
+                      {/if}
+                    </button>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          {#if tools.length > 0}
+            <div>
+              <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-1.5">{$t('discovery.tools')}</div>
+              <p class="text-[10px] text-[var(--color-text-secondary)] mb-2">{$t('discovery.toolsNote')}</p>
+              <div class="space-y-1.5">
+                {#each tools as f (keyOf(f))}
+                  <div class="flex items-center justify-between p-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]/50">
+                    <div class="flex items-center gap-2.5 min-w-0">
+                      <div class="w-6 h-6 rounded bg-orange-500/10 text-orange-500 flex items-center justify-center font-bold text-[11px] shrink-0">{f.displayName.charAt(0)}</div>
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-2">
+                          <span class="text-sm font-semibold">{f.displayName}</span>
+                          {#if f.version}
+                            <span class="font-mono text-xs font-bold text-primary-500">{f.version}</span>
+                          {/if}
+                        </div>
+                        <p class="font-mono text-[10px] text-[var(--color-text-secondary)] truncate" title={f.path}>{f.path}</p>
+                      </div>
+                    </div>
+                    <button
+                      class="text-xs px-3 py-1.5 rounded-lg font-medium bg-primary-600 hover:bg-primary-700 text-white shadow-sm disabled:opacity-50 shrink-0 ml-3"
+                      on:click={() => doImport(f)}
+                      disabled={importing !== ''}
+                      title={$t('discovery.importHint')}
                     >
                       {#if importing === keyOf(f)}
                         <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-1"></div>

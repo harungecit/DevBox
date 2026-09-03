@@ -13,9 +13,10 @@
     DetectExternalDBTools,
     LaunchExternalTool,
     OpenInBrowser,
-    IsComposerInstalled,
+    GetComposerInfo,
     InstallComposer,
-    GetComposerVersion,
+    UpdateComposer,
+    UninstallComposer,
     GetGlobalRuntime,
     GetNpmVersion,
     GetNpmLatestVersion,
@@ -144,7 +145,22 @@
   // PHP / Composer
   let composerInstalled = false;
   let composerVersion = '';
+  let composerLatest = '';
+  let composerImported = false;
+  let composerPharPath = '';
+  let composerUpdateAvailable = false;
   let installingComposer = false;
+  let updatingComposer = false;
+  let uninstallingComposer = false;
+  $: composerBusy = installingComposer || updatingComposer || uninstallingComposer;
+  function applyComposerInfo(info: any) {
+    composerInstalled = !!info?.installed;
+    composerVersion = info?.version || '';
+    composerLatest = info?.latest || '';
+    composerImported = !!info?.imported;
+    composerPharPath = info?.pharPath || '';
+    composerUpdateAvailable = !!info?.updateAvailable;
+  }
 
   // Node ecosystem
   let npmVersion = '';
@@ -171,10 +187,7 @@
       activePhpVersion = await GetGlobalRuntime('php');
       activeNodeVersion = await GetGlobalRuntime('node');
 
-      if (activePhpVersion) {
-        composerInstalled = await IsComposerInstalled();
-        if (composerInstalled) composerVersion = await GetComposerVersion();
-      }
+      applyComposerInfo(await GetComposerInfo());
 
       if (activeNodeVersion) {
         npmVersion = await GetNpmVersion();
@@ -201,6 +214,29 @@
       errorMessage = `Composer: ${errorStr(e)}`;
       installingComposer = false;
     }
+  }
+
+  async function updateComposer() {
+    updatingComposer = true;
+    errorMessage = '';
+    try {
+      await UpdateComposer();
+    } catch (e: any) {
+      errorMessage = `Composer: ${errorStr(e)}`;
+      updatingComposer = false;
+    }
+  }
+
+  async function uninstallComposer() {
+    uninstallingComposer = true;
+    errorMessage = '';
+    try {
+      await UninstallComposer();
+      applyComposerInfo(await GetComposerInfo());
+    } catch (e: any) {
+      errorMessage = `Composer: ${errorStr(e)}`;
+    }
+    uninstallingComposer = false;
   }
 
   async function updateNpm() {
@@ -361,11 +397,15 @@
     // the Tools page shows up-to-date state without manual refresh.
     eventUnsubs.push(EventsOn('composer:installed', () => {
       installingComposer = false;
-      composerInstalled = true;
-      GetComposerVersion().then(v => composerVersion = v);
+      GetComposerInfo().then(applyComposerInfo).catch(() => {});
+    }));
+    eventUnsubs.push(EventsOn('composer:updated', (info: any) => {
+      updatingComposer = false;
+      applyComposerInfo(info);
     }));
     eventUnsubs.push(EventsOn('composer:error', (data: any) => {
       installingComposer = false;
+      updatingComposer = false;
       errorMessage = `Composer: ${data?.error || 'install failed'}`;
     }));
     eventUnsubs.push(EventsOn('npm:updated', (data: any) => {
@@ -551,13 +591,25 @@
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-sm font-bold">Composer</span>
               {#if composerInstalled}
-                <span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold uppercase">{$t('tools.labelInstalled')}</span>
+                {#if composerImported}
+                  <span class="text-[10px] px-1.5 py-0.5 bg-sky-500/10 text-sky-500 rounded border border-sky-500/20 font-bold uppercase" title={$t('tools.composerImportedHint')}>{$t('tools.labelImported')}</span>
+                {:else}
+                  <span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold uppercase">{$t('tools.labelInstalled')}</span>
+                {/if}
                 {#if composerVersion}
                   <span class="text-xs font-mono text-[var(--color-text-secondary)]">v{composerVersion}</span>
+                {/if}
+                {#if composerUpdateAvailable}
+                  <span class="text-[10px] px-1.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded border border-amber-500/20 font-bold font-mono">{$t('tools.latestVersion', composerLatest)}</span>
+                {:else if composerVersion && composerLatest}
+                  <span class="text-[10px] text-emerald-500 font-bold uppercase">{$t('tools.upToDate')}</span>
                 {/if}
               {/if}
             </div>
             <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">{$t('tools.composerDesc')}</p>
+            {#if composerImported && composerPharPath}
+              <p class="font-mono text-[10px] text-[var(--color-text-secondary)] truncate mt-0.5" title={composerPharPath}>{composerPharPath}</p>
+            {/if}
             {#if !activePhpVersion}
               <p class="text-[11px] text-[var(--color-text-secondary)] italic mt-1">{$t('tools.composerNeedsPhp')}</p>
             {/if}
@@ -565,13 +617,22 @@
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
           {#if !composerInstalled}
-            <button class="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5" on:click={installComposer} disabled={installingComposer || !activePhpVersion}>
+            <button class="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5" on:click={installComposer} disabled={composerBusy || !activePhpVersion}>
               {#if installingComposer}
                 <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                 {$t('tools.installing')}
               {:else}
                 {$t('tools.install')}
               {/if}
+            </button>
+          {:else}
+            {#if composerUpdateAvailable}
+              <button class="text-xs px-2.5 py-1 rounded-lg bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50" on:click={updateComposer} disabled={composerBusy}>
+                {#if updatingComposer}<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-1"></div>{$t('tools.updating')}{:else}{$t('tools.update')}{/if}
+              </button>
+            {/if}
+            <button class="btn-icon text-red-500 hover:bg-red-500/10" on:click={() => askUninstall('Composer', uninstallComposer)} disabled={composerBusy} title={composerImported ? $t('tools.unlink') : $t('tools.uninstall')}>
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
           {/if}
         </div>

@@ -8,3 +8,5 @@ package discovery
 func runtimeCandidateRoots(name string) []string { return nil }
 
 func serviceCandidateRoots(name string) []string { return nil }
+
+func composerCandidatePhars() []string { return nil }

@@ -69,3 +69,16 @@ func serviceCandidateRoots(name string) []string {
 	}
 	return nil
 }
+
+// composerCandidatePhars lists well-known macOS Composer locations (the
+// Homebrew formula installs the phar itself as bin/composer).
+func composerCandidatePhars() []string {
+	home, _ := os.UserHomeDir()
+	return []string{
+		"/opt/homebrew/bin/composer",
+		"/usr/local/bin/composer",
+		"/usr/local/bin/composer.phar",
+		filepath.Join(home, ".composer", "composer.phar"),
+		filepath.Join(home, "composer.phar"),
+	}
+}

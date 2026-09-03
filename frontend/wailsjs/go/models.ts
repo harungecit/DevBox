@@ -464,6 +464,28 @@ export namespace project {
 
 export namespace runtime {
 	
+	export class ComposerInfo {
+	    installed: boolean;
+	    version: string;
+	    latest: string;
+	    updateAvailable: boolean;
+	    imported: boolean;
+	    pharPath: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ComposerInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.installed = source["installed"];
+	        this.version = source["version"];
+	        this.latest = source["latest"];
+	        this.updateAvailable = source["updateAvailable"];
+	        this.imported = source["imported"];
+	        this.pharPath = source["pharPath"];
+	    }
+	}
 	export class PHPCGIInstance {
 	    version: string;
 	    port: number;

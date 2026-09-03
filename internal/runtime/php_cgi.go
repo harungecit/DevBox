@@ -2,13 +2,10 @@ package runtime
 
 import (
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	goruntime "runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,115 +14,6 @@ import (
 	"DevBox/internal/config"
 	"DevBox/internal/platform"
 )
-
-const composerDownloadURL = "https://getcomposer.org/download/latest-stable/composer.phar"
-
-// --- Composer ---
-
-// IsComposerInstalled checks if composer.phar exists in the active PHP directory
-func IsComposerInstalled() bool {
-	phpDir := activePHPDir()
-	if phpDir == "" {
-		return false
-	}
-	_, err := os.Stat(filepath.Join(phpDir, "composer.phar"))
-	return err == nil
-}
-
-// InstallComposer downloads composer.phar and creates a bat wrapper
-func InstallComposer(progress chan<- Progress) error {
-	phpDir := activePHPDir()
-	if phpDir == "" {
-		return fmt.Errorf("no active PHP version set")
-	}
-	return InstallComposerInto(phpDir, progress)
-}
-
-// InstallComposerInto installs Composer into a specific PHP version directory.
-func InstallComposerInto(phpDir string, progress chan<- Progress) error {
-	pharPath := filepath.Join(phpDir, "composer.phar")
-
-	if progress != nil {
-		progress <- Progress{Percent: 10, Message: "Downloading composer.phar..."}
-	}
-
-	resp, err := http.Get(composerDownloadURL)
-	if err != nil {
-		return fmt.Errorf("download failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
-	}
-
-	out, err := os.Create(pharPath)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		os.Remove(pharPath)
-		return err
-	}
-
-	if progress != nil {
-		progress <- Progress{Percent: 80, Message: "Creating wrapper..."}
-	}
-
-	// Create platform-appropriate wrapper script
-	if goruntime.GOOS == "windows" {
-		batPath := filepath.Join(phpDir, "composer.bat")
-		bat := "@echo off\r\nphp \"%~dp0composer.phar\" %*\r\n"
-		if err := os.WriteFile(batPath, []byte(bat), 0644); err != nil {
-			return err
-		}
-	} else {
-		shPath := filepath.Join(phpDir, "composer")
-		sh := "#!/bin/sh\nexec php \"$(dirname \"$0\")/composer.phar\" \"$@\"\n"
-		if err := os.WriteFile(shPath, []byte(sh), 0755); err != nil {
-			return err
-		}
-	}
-
-	if progress != nil {
-		progress <- Progress{Percent: 100, Message: "Composer installed"}
-	}
-	return nil
-}
-
-// GetComposerVersion returns the installed Composer version string
-func GetComposerVersion() string {
-	phpDir := activePHPDir()
-	if phpDir == "" {
-		return ""
-	}
-
-	phpExe := filepath.Join(phpDir, platform.BinaryName("php"))
-	pharPath := filepath.Join(phpDir, "composer.phar")
-
-	if _, err := os.Stat(pharPath); os.IsNotExist(err) {
-		return ""
-	}
-
-	cmd := exec.Command(phpExe, pharPath, "--version", "--no-ansi")
-	platform.SetProcessAttrs(cmd, false, true)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-
-	// Output: "Composer version 2.8.x ..."
-	parts := strings.Fields(strings.TrimSpace(string(out)))
-	for i, p := range parts {
-		if p == "version" && i+1 < len(parts) {
-			return parts[i+1]
-		}
-	}
-	return strings.TrimSpace(string(out))
-}
 
 // --- PHP-CGI (FastCGI) — one instance per PHP version in use ---
 //

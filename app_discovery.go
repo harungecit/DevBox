@@ -9,6 +9,8 @@ import (
 	"DevBox/internal/pathenv"
 	"DevBox/internal/runtime"
 	"DevBox/internal/service"
+
+	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // Discovery scan results are cached briefly so the Runtimes and Services
@@ -69,6 +71,10 @@ func filterCurrentlyInstalled(items []discovery.Found) []discovery.Found {
 				continue
 			}
 			f.Conflict = service.GetConflictingService(f.Name)
+		case "tool":
+			if f.Name == "composer" && runtime.IsComposerInstalled() {
+				continue
+			}
 		}
 		out = append(out, f)
 	}
@@ -129,4 +135,22 @@ func (a *App) ImportExternalService(name, path, version string) error {
 		}
 	})
 	return nil
+}
+
+// ImportExternalTool brings a developer tool found by ScanExternalSoftware
+// under DevBox management in place. Composer is the only tool today: DevBox
+// records the phar's location and runs it through its own wrapper with the
+// active PHP — nothing is copied. Emits composer:installed on success.
+func (a *App) ImportExternalTool(name, path string) error {
+	switch name {
+	case "composer":
+		if err := runtime.ImportComposer(path); err != nil {
+			return err
+		}
+		pathenv.AddToPath(runtime.ComposerDir())
+		invalidateDiscoveryCache()
+		wailsRuntime.EventsEmit(a.ctx, "composer:installed", map[string]interface{}{"imported": true})
+		return nil
+	}
+	return fmt.Errorf("unknown tool: %s", name)
 }

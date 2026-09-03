@@ -111,6 +111,23 @@ func serviceCandidateRoots(name string) []string {
 	return nil
 }
 
+// composerCandidatePhars lists well-known Windows Composer locations. Entries
+// may be the phar itself or a wrapper that names it; globs are allowed.
+func composerCandidatePhars() []string {
+	home, _ := os.UserHomeDir()
+	appData := envOr("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	programData := envOr("ProgramData", `C:\ProgramData`)
+	return []string{
+		filepath.Join(programData, "ComposerSetup", "bin", "composer.phar"),
+		filepath.Join(appData, "Composer", "composer.phar"),
+		`C:\laragon\bin\composer\composer.phar`,
+		`C:\xampp\php\composer.phar`,
+		`C:\wamp64\bin\composer\composer.phar`,
+		`C:\composer\composer.phar`,
+		filepath.Join(home, "scoop", "apps", "composer", "current", "composer.phar"),
+	}
+}
+
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

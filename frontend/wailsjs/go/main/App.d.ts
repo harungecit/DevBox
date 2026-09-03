@@ -5,10 +5,10 @@ import {updater} from '../models';
 import {service} from '../models';
 import {tools} from '../models';
 import {tunnel} from '../models';
+import {runtime} from '../models';
 import {config} from '../models';
 import {devtools} from '../models';
 import {main} from '../models';
-import {runtime} from '../models';
 import {terminal} from '../models';
 import {discovery} from '../models';
 
@@ -55,6 +55,8 @@ export function GetAvailableTemplates():Promise<Array<project.FrameworkTemplate>
 export function GetBunVersion():Promise<string>;
 
 export function GetCloudflareStatus():Promise<tunnel.CloudflareStatus>;
+
+export function GetComposerInfo():Promise<runtime.ComposerInfo>;
 
 export function GetComposerVersion():Promise<string>;
 
@@ -139,6 +141,8 @@ export function HideToTray():Promise<void>;
 export function ImportExternalRuntime(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function ImportExternalService(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function ImportExternalTool(arg1:string,arg2:string):Promise<void>;
 
 export function InstallAdminer():Promise<void>;
 
@@ -306,6 +310,8 @@ export function UninstallAdminer():Promise<void>;
 
 export function UninstallBun():Promise<void>;
 
+export function UninstallComposer():Promise<void>;
+
 export function UninstallDevTool(arg1:string):Promise<void>;
 
 export function UninstallPeclExtension(arg1:string,arg2:string):Promise<void>;
@@ -315,6 +321,8 @@ export function UninstallProxy():Promise<void>;
 export function UninstallRuntime(arg1:string,arg2:string):Promise<void>;
 
 export function UninstallService(arg1:string):Promise<void>;
+
+export function UpdateComposer():Promise<void>;
 
 export function UpdateNpm():Promise<void>;
 

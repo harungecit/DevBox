@@ -30,11 +30,11 @@ import (
 
 // Found describes one external installation that DevBox can import.
 type Found struct {
-	Kind        string `json:"kind"` // "runtime" or "service"
-	Name        string `json:"name"` // registry key: "node", "php", "mysql", ...
+	Kind        string `json:"kind"` // "runtime", "service" or "tool"
+	Name        string `json:"name"` // registry key: "node", "php", "mysql", "composer", ...
 	DisplayName string `json:"displayName"`
 	Version     string `json:"version"`
-	Path        string `json:"path"` // root directory to import from
+	Path        string `json:"path"` // root directory to import from (tools: the file itself)
 	// Conflict is the display name of an installed DevBox service in the same
 	// conflict group (e.g. MariaDB when a MySQL install is found). Import is
 	// blocked until the conflicting service is uninstalled.
@@ -98,7 +98,114 @@ func ScanAll() []Found {
 	var out []Found
 	out = append(out, ScanRuntimes()...)
 	out = append(out, ScanServices()...)
+	out = append(out, ScanTools()...)
 	return out
+}
+
+// ScanTools finds external developer tools DevBox can use in place. Today
+// that is Composer: a composer.phar reached through PATH wrappers or living
+// in a well-known location (Laragon, XAMPP, Composer-Setup, scoop, Homebrew).
+func ScanTools() []Found {
+	if runtime.IsComposerInstalled() {
+		return nil
+	}
+	phars := map[string]bool{}
+	for _, name := range composerWrapperNames() {
+		for _, hit := range findInPATH(name) {
+			if phar := composerPharFromWrapper(hit); phar != "" {
+				phars[normPath(phar)] = true
+			}
+		}
+	}
+	for _, pattern := range composerCandidatePhars() {
+		matches, _ := filepath.Glob(pattern)
+		for _, m := range matches {
+			if phar := composerPharFromWrapper(m); phar != "" {
+				phars[normPath(phar)] = true
+			}
+		}
+	}
+	var out []Found
+	for _, phar := range sortedSlice(phars) {
+		if underDataDir(phar) {
+			continue
+		}
+		out = append(out, Found{
+			Kind:        "tool",
+			Name:        "composer",
+			DisplayName: "Composer",
+			Version:     runtime.ComposerPharVersion(phar),
+			Path:        phar,
+		})
+	}
+	return dedupeByVersion(out)
+}
+
+// composerWrapperNames lists the file names a Composer install exposes on PATH.
+func composerWrapperNames() []string {
+	if goruntime.GOOS == "windows" {
+		return []string{"composer.bat", "composer.cmd", "composer.phar", "composer"}
+	}
+	return []string{"composer", "composer.phar"}
+}
+
+var composerPharRefRe = regexp.MustCompile(`(?i)"?([^"\s]*composer\.phar)"?`)
+
+// composerPharFromWrapper resolves whatever lives at p (the phar itself, a
+// symlink to it, or a .bat / shell wrapper) to the composer.phar it runs.
+func composerPharFromWrapper(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		p = resolved
+	}
+	if !fileExists(p) {
+		return ""
+	}
+	if isPharFile(p) {
+		return p
+	}
+	// Wrapper script: prefer a phar next to it, then libexec/ (Homebrew), then
+	// any composer.phar path the script mentions.
+	dir := filepath.Dir(p)
+	for _, cand := range []string{
+		filepath.Join(dir, "composer.phar"),
+		filepath.Join(filepath.Dir(dir), "libexec", "composer.phar"),
+	} {
+		if isPharFile(cand) {
+			return cand
+		}
+	}
+	data, err := os.ReadFile(p)
+	if err != nil || len(data) > 64*1024 {
+		return ""
+	}
+	for _, m := range composerPharRefRe.FindAllStringSubmatch(string(data), -1) {
+		ref := strings.ReplaceAll(m[1], "%~dp0", dir+string(filepath.Separator))
+		ref = strings.ReplaceAll(ref, `$(dirname "$0")`, dir)
+		if !filepath.IsAbs(ref) {
+			ref = filepath.Join(dir, ref)
+		}
+		if isPharFile(ref) {
+			return filepath.Clean(ref)
+		}
+	}
+	return ""
+}
+
+// isPharFile reports whether p is a PHP phar archive (starts with a PHP stub,
+// possibly behind a shebang) rather than a wrapper script.
+func isPharFile(p string) bool {
+	fi, err := os.Stat(p)
+	if err != nil || fi.IsDir() || fi.Size() < 64*1024 {
+		return false // composer.phar is a few MB; wrappers are tiny
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	head := make([]byte, 4096)
+	n, _ := f.Read(head)
+	return strings.Contains(string(head[:n]), "<?php")
 }
 
 // ScanRuntimes finds external runtime installations.

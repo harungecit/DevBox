@@ -49,7 +49,7 @@ func devboxPathDirs() []string {
 		}
 	}
 	tools := filepath.Join(config.GetDataDir(), "tools")
-	for _, sub := range []string{"bun", "uv", "gobin", filepath.Join("cargo", "bin"), "mkcert", "cloudflared"} {
+	for _, sub := range []string{"bun", "composer", "uv", "gobin", filepath.Join("cargo", "bin"), "mkcert", "cloudflared"} {
 		if d := filepath.Join(tools, sub); dirExists(d) {
 			dirs = append(dirs, d)
 		}

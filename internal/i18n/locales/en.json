@@ -229,6 +229,10 @@
   "tools.pnpmDesc": "Efficient, disk-saving package manager (via corepack)",
   "tools.bunDesc": "All-in-one runtime & toolkit (separate binary)",
   "tools.composerNeedsPhp": "Requires an active PHP version",
+  "tools.labelImported": "Imported",
+  "tools.latestVersion": "latest {0}",
+  "tools.unlink": "Remove link (the system install stays where it is)",
+  "tools.composerImportedHint": "System Composer used in place with the active PHP",
   "tools.pkgMgrsNeedNode": "Requires an active Node.js version",
 
   "dashboard.proxyTitle": "Front-door",
@@ -470,5 +474,7 @@
   "discovery.importing": "Importing...",
   "discovery.importHint": "Manage this installation from DevBox — in place, nothing is moved",
   "discovery.conflictHint": "{0} is already installed — uninstall it first",
+  "discovery.tools": "Tools",
+  "discovery.toolsNote": "Tools are used right where they are — DevBox only adds a launcher that runs them with the active PHP.",
   "discovery.empty": "No external installations found. Everything on this computer is either already managed by DevBox or not installed."
 }
