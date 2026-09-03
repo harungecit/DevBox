@@ -1,5 +1,8 @@
-//go:build darwin
+//go:build darwin || linux
 
+// darwinPlatform is the POSIX implementation: macOS in production, Linux for
+// CI and development builds (no packaged Linux release yet). The few
+// macOS-only pieces (open, osascript, LaunchAgents, zsh) branch on GOOS.
 package platform
 
 import (
@@ -8,9 +11,32 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"syscall"
 )
+
+// openCommand is the desktop "open this" launcher: open on macOS, xdg-open on Linux.
+func openCommand() string {
+	if goruntime.GOOS == "linux" {
+		return "xdg-open"
+	}
+	return "open"
+}
+
+// shellRcFile is the shell startup file DevBox appends its source line to.
+func shellRcFile() string {
+	home, _ := os.UserHomeDir()
+	if goruntime.GOOS == "linux" {
+		if _, err := os.Stat(filepath.Join(home, ".zshrc")); err == nil {
+			if shell := os.Getenv("SHELL"); strings.HasSuffix(shell, "zsh") {
+				return filepath.Join(home, ".zshrc")
+			}
+		}
+		return filepath.Join(home, ".bashrc")
+	}
+	return filepath.Join(home, ".zshrc")
+}
 
 func init() {
 	current = &darwinPlatform{}
@@ -131,10 +157,10 @@ func (d *darwinPlatform) PathContains(dir string) bool {
 	return false
 }
 
-// ensureShellSource adds a source line to ~/.zshrc if not already present.
+// ensureShellSource adds a source line to the shell rc file (~/.zshrc on
+// macOS, ~/.bashrc or ~/.zshrc on Linux) if not already present.
 func (d *darwinPlatform) ensureShellSource() error {
-	home, _ := os.UserHomeDir()
-	zshrc := filepath.Join(home, ".zshrc")
+	zshrc := shellRcFile()
 	sourceLine := fmt.Sprintf(`[ -f "%s" ] && source "%s"`, pathShFile(), pathShFile())
 
 	data, err := os.ReadFile(zshrc)
@@ -178,7 +204,7 @@ func (d *darwinPlatform) KillProcessTree(pid int) error {
 }
 
 func (d *darwinPlatform) LaunchInstaller(path string, args ...string) error {
-	return exec.Command("open", path).Start()
+	return exec.Command(openCommand(), path).Start()
 }
 
 // LaunchInstallerWait on macOS just opens the package (installing a .dmg is
@@ -214,9 +240,14 @@ func (d *darwinPlatform) WriteHostsFileElevated(content []byte) error {
 	}
 	defer os.Remove(tmpFile)
 
-	// Use osascript to elevate with admin privileges
-	script := fmt.Sprintf(`do shell script "cp '%s' '/etc/hosts'" with administrator privileges`, tmpFile)
-	cmd := exec.Command("osascript", "-e", script)
+	// Elevate: osascript on macOS, pkexec (polkit prompt) on Linux.
+	var cmd *exec.Cmd
+	if goruntime.GOOS == "linux" {
+		cmd = exec.Command("pkexec", "cp", tmpFile, "/etc/hosts")
+	} else {
+		script := fmt.Sprintf(`do shell script "cp '%s' '/etc/hosts'" with administrator privileges`, tmpFile)
+		cmd = exec.Command("osascript", "-e", script)
+	}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("elevated write failed: %s - %w", strings.TrimSpace(string(out)), err)
 	}
@@ -229,6 +260,21 @@ const launchAgentLabel = "com.devbox.app"
 
 func (d *darwinPlatform) SetAutoStart(enabled bool) error {
 	home, _ := os.UserHomeDir()
+	if goruntime.GOOS == "linux" {
+		// XDG autostart entry.
+		desktop := filepath.Join(home, ".config", "autostart", "devbox.desktop")
+		if !enabled {
+			os.Remove(desktop)
+			return nil
+		}
+		exePath, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("failed to get executable path: %w", err)
+		}
+		os.MkdirAll(filepath.Dir(desktop), 0755)
+		entry := "[Desktop Entry]\nType=Application\nName=DevBox\nExec=" + exePath + " " + AutoStartFlag + "\nX-GNOME-Autostart-enabled=true\n"
+		return os.WriteFile(desktop, []byte(entry), 0644)
+	}
 	plistPath := filepath.Join(home, "Library", "LaunchAgents", launchAgentLabel+".plist")
 
 	if !enabled {
@@ -264,6 +310,10 @@ func (d *darwinPlatform) SetAutoStart(enabled bool) error {
 
 func (d *darwinPlatform) IsAutoStartEnabled() bool {
 	home, _ := os.UserHomeDir()
+	if goruntime.GOOS == "linux" {
+		_, err := os.Stat(filepath.Join(home, ".config", "autostart", "devbox.desktop"))
+		return err == nil
+	}
 	_, err := os.Stat(filepath.Join(home, "Library", "LaunchAgents", launchAgentLabel+".plist"))
 	return err == nil
 }
@@ -279,11 +329,11 @@ func (d *darwinPlatform) DefaultDataDir() string {
 // --- System operations ---
 
 func (d *darwinPlatform) OpenFolder(path string) error {
-	return exec.Command("open", path).Start()
+	return exec.Command(openCommand(), path).Start()
 }
 
 func (d *darwinPlatform) OpenFile(path string) error {
-	return exec.Command("open", path).Start()
+	return exec.Command(openCommand(), path).Start()
 }
 
 // --- Platform naming ---
