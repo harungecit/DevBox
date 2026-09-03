@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -14,7 +15,7 @@ import (
 // HTTP server (app server) or is served by a web server, and how to start it.
 type Framework struct {
 	Name      string `json:"name"`
-	Runtime   string `json:"runtime"`   // php | node | python | go | rust | static
+	Runtime   string `json:"runtime"`   // php | node | python | go | rust | static | a plugin runtime (crystal…)
 	AppServer bool   `json:"appServer"` // true → dev server + front-door, false → nginx/apache/caddy/frankenphp vhost
 	Port      int    `json:"port"`      // preferred dev-server port (app servers only)
 
@@ -36,6 +37,7 @@ type detector struct {
 	goMod   string            // go.mod contents
 	cargo   string            // Cargo.toml contents
 	pyDeps  string            // requirements.txt + pyproject.toml + Pipfile, lower-cased
+	shard   string            // shard.yml contents (Crystal)
 }
 
 func newDetector(path string) *detector {
@@ -65,6 +67,9 @@ func newDetector(path string) *detector {
 	}
 	if b, err := os.ReadFile(filepath.Join(path, "Cargo.toml")); err == nil {
 		d.cargo = string(b)
+	}
+	if b, err := os.ReadFile(filepath.Join(path, "shard.yml")); err == nil {
+		d.shard = string(b)
 	}
 	var py strings.Builder
 	for _, f := range []string{"requirements.txt", "pyproject.toml", "Pipfile", "requirements/base.txt"} {
@@ -106,6 +111,27 @@ func (d *detector) pyDep(name string) bool {
 func (d *detector) hasScript(name string) bool {
 	_, ok := d.pkgScr[name]
 	return ok
+}
+
+// shardDep reports whether shard.yml lists a dependency (Crystal).
+func (d *detector) shardDep(name string) bool {
+	return regexp.MustCompile(`(?m)^\s+` + regexp.QuoteMeta(name) + `:\s*$`).MatchString(d.shard)
+}
+
+// crystalMain finds the file `crystal run` should start: the first target's
+// `main:` in shard.yml, else src/<folder>.cr, else the first src/*.cr.
+func (d *detector) crystalMain() string {
+	if m := regexp.MustCompile(`(?m)^\s+main:\s*(\S+)`).FindStringSubmatch(d.shard); m != nil {
+		return filepath.FromSlash(strings.Trim(m[1], `"'`))
+	}
+	base := filepath.Base(d.path)
+	if cand := filepath.Join("src", base+".cr"); d.has(cand) {
+		return cand
+	}
+	if matches, _ := filepath.Glob(filepath.Join(d.path, "src", "*.cr")); len(matches) > 0 {
+		return filepath.Join("src", filepath.Base(matches[0]))
+	}
+	return filepath.Join("src", base+".cr")
 }
 
 // pythonEntry finds the module:app pair ASGI/WSGI servers need (main:app,
@@ -153,6 +179,15 @@ func flask(d *detector, port int) (string, []string) {
 
 func goRun(*detector, int) (string, []string)    { return "go", []string{"run", "."} }
 func cargoRun(*detector, int) (string, []string) { return "cargo", []string{"run"} }
+
+// kemalRun starts a Kemal app; Kemal.run parses --bind/--port from ARGV.
+func kemalRun(d *detector, port int) (string, []string) {
+	return "crystal", []string{"run", d.crystalMain(), "--", "--bind", "127.0.0.1", "--port", strconv.Itoa(port)}
+}
+
+func crystalRun(d *detector, _ int) (string, []string) {
+	return "crystal", []string{"run", d.crystalMain()}
+}
 
 // Catalog is the ordered framework registry. Order matters for detection.
 var Catalog = []Framework{
@@ -300,6 +335,12 @@ var Catalog = []Framework{
 		detect: func(d *detector) bool { return strings.Contains(d.cargo, "axum") }, start: cargoRun},
 	{Name: "Rocket", Runtime: "rust", AppServer: true, Port: 8000,
 		detect: func(d *detector) bool { return strings.Contains(d.cargo, "rocket") }, start: cargoRun},
+	// ---- Crystal (plugin runtime; needs the "crystal" vfox plugin) ----
+	{Name: "Kemal", Runtime: "crystal", AppServer: true, Port: 3000,
+		detect: func(d *detector) bool { return d.shardDep("kemal") }, start: kemalRun},
+	{Name: "Crystal", Runtime: "crystal", AppServer: true, Port: 3000,
+		detect: func(d *detector) bool { return d.has("shard.yml") }, start: crystalRun},
+
 	{Name: "Rust", Runtime: "rust", AppServer: true, Port: 8080,
 		detect: func(d *detector) bool { return d.has("Cargo.toml") }, start: cargoRun},
 

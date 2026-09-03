@@ -74,7 +74,7 @@
     runtimeVersion: string;
   }
 
-  const appServerFrameworks = ['Next.js', 'Nuxt', 'Vue', 'React', 'Svelte', 'Angular', 'Go', 'Rust', 'Django', 'Python'];
+  const appServerFrameworks = ['Next.js', 'Nuxt', 'Vue', 'React', 'Svelte', 'Angular', 'Go', 'Rust', 'Django', 'Python', 'Kemal', 'Crystal'];
 
   // Detected frameworks imply their runtime; offering PHP for a Next.js app only
   // produces broken configs. Mirrors project.RuntimeFromFramework on the Go side.
@@ -82,6 +82,7 @@
     'Laravel': 'php', 'WordPress': 'php', 'Symfony': 'php', 'CodeIgniter': 'php', 'Yii': 'php', 'CakePHP': 'php', 'Drupal': 'php', 'PHP': 'php',
     'Next.js': 'node', 'Nuxt': 'node', 'Vue': 'node', 'React': 'node', 'Svelte': 'node', 'Angular': 'node',
     'Django': 'python', 'Python': 'python', 'Go': 'go', 'Rust': 'rust', 'Static': 'static',
+    'Kemal': 'crystal', 'Crystal': 'crystal',
   };
   // Live catalog from the backend (project.Catalog); the static maps above are
   // only the fallback until it arrives.
@@ -477,6 +478,7 @@
       nextjs: 'text-slate-400', nuxt: 'text-green-500', vue: 'text-emerald-500', react: 'text-cyan-500',
       svelte: 'text-orange-500', angular: 'text-red-600',
       go: 'text-sky-500', rust: 'text-orange-600', django: 'text-green-600', static: 'text-gray-500',
+      kemal: 'text-zinc-500',
     };
     return map[id] || 'text-slate-400';
   }
@@ -834,6 +836,8 @@
       'Flask': 'bg-slate-500/10 text-slate-400 border-slate-500/20',
       'Goravel': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
       'Gin': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
+      'Kemal': 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20',
+      'Crystal': 'bg-neutral-500/10 text-neutral-500 border-neutral-500/20',
       'Fiber': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
       'Echo': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
       'Actix': 'bg-orange-600/10 text-orange-600 border-orange-600/20',

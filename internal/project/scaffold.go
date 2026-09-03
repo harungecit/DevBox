@@ -56,6 +56,8 @@ var templates = []FrameworkTemplate{
 	{ID: "go", Name: "Go", Category: "go", RequiredRuntime: "go"},
 	{ID: "gin", Name: "Gin", Category: "go", RequiredRuntime: "go"},
 	{ID: "rust", Name: "Rust", Category: "rust", RequiredRuntime: "rust"},
+	// Needs the "crystal" vfox plugin runtime; greyed out until it is installed.
+	{ID: "kemal", Name: "Kemal", Category: "crystal", RequiredRuntime: "crystal"},
 	{ID: "django", Name: "Django", Category: "python", RequiredRuntime: "python"},
 	{ID: "flask", Name: "Flask", Category: "python", RequiredRuntime: "python"},
 	{ID: "fastapi", Name: "FastAPI", Category: "python", RequiredRuntime: "python"},
@@ -294,16 +296,16 @@ func scaffoldWithCommand(tmpl *FrameworkTemplate, parentDir, projectName string,
 		args = []string{"sv@latest", "create", projectName, "--template", "minimal", "--types", "ts", "--no-add-ons", "--install", "npm"}
 	case "express":
 		return scaffoldFilesThen(parentDir, projectName, starterExpress(projectName),
-			filepath.Join(binDir, platform.ScriptName("npm")), []string{"install"}, binDir, progress)
+			filepath.Join(binDir, platform.ScriptName("npm")), []string{"install"}, buildEnv(binDir), progress)
 	case "gin":
 		return scaffoldFilesThen(parentDir, projectName, starterGin(projectName),
-			filepath.Join(binDir, platform.BinaryName("go")), []string{"get", "github.com/gin-gonic/gin@latest"}, binDir, progress)
+			filepath.Join(binDir, platform.BinaryName("go")), []string{"get", "github.com/gin-gonic/gin@latest"}, buildEnv(binDir), progress)
 	case "flask":
 		return scaffoldFilesThen(parentDir, projectName, starterFlask(),
-			filepath.Join(binDir, platform.BinaryName("python")), []string{"-m", "pip", "install", "-r", "requirements.txt"}, binDir, progress)
+			filepath.Join(binDir, platform.BinaryName("python")), []string{"-m", "pip", "install", "-r", "requirements.txt"}, buildEnv(binDir), progress)
 	case "fastapi":
 		return scaffoldFilesThen(parentDir, projectName, starterFastAPI(),
-			filepath.Join(binDir, platform.BinaryName("python")), []string{"-m", "pip", "install", "-r", "requirements.txt"}, binDir, progress)
+			filepath.Join(binDir, platform.BinaryName("python")), []string{"-m", "pip", "install", "-r", "requirements.txt"}, buildEnv(binDir), progress)
 	case "nextjs":
 		cmdName = filepath.Join(binDir, platform.ScriptName("npx"))
 		args = []string{"create-next-app@latest", projectName, "--use-npm"}
@@ -325,6 +327,9 @@ func scaffoldWithCommand(tmpl *FrameworkTemplate, parentDir, projectName string,
 	case "rust":
 		cmdName = filepath.Join(binDir, platform.BinaryName("cargo"))
 		args = []string{"init", projectName}
+	case "kemal":
+		return scaffoldFilesThen(parentDir, projectName, starterKemal(projectName),
+			filepath.Join(binDir, platform.BinaryName("shards")), []string{"install"}, runtimeEnv(mgr, ver), progress)
 	case "django":
 		cmdName = filepath.Join(binDir, platform.BinaryName("python"))
 		args = []string{"-m", "django", "startproject", projectName}
@@ -367,7 +372,7 @@ func scaffoldWithCommand(tmpl *FrameworkTemplate, parentDir, projectName string,
 // then runs one command inside it (npm install, pip install, go get…), streaming
 // its output as progress. Used for frameworks without a non-interactive
 // official generator.
-func scaffoldFilesThen(parentDir, projectName string, files map[string]string, cmdName string, args []string, binDir string, progress chan<- ScaffoldProgress) error {
+func scaffoldFilesThen(parentDir, projectName string, files map[string]string, cmdName string, args []string, env []string, progress chan<- ScaffoldProgress) error {
 	dir := filepath.Join(parentDir, projectName)
 	if _, err := os.Stat(dir); err == nil {
 		return fmt.Errorf("folder already exists: %s", dir)
@@ -386,7 +391,7 @@ func scaffoldFilesThen(parentDir, projectName string, files map[string]string, c
 
 	cmd := exec.Command(cmdName, args...)
 	cmd.Dir = dir
-	cmd.Env = buildEnv(binDir)
+	cmd.Env = env
 	platform.SetProcessAttrs(cmd, true, true)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -524,6 +529,20 @@ func findGitExe() string {
 }
 
 // buildEnv creates a modified environment with binDir prepended to PATH
+// runtimeEnv is buildEnv for a runtime version: every PATH dir the version
+// contributes plus its variables (plugin runtimes may need several).
+func runtimeEnv(mgr runtime.RuntimeManager, ver string) []string {
+	paths := runtime.ActivationPaths(mgr, ver)
+	if len(paths) == 0 {
+		return os.Environ()
+	}
+	env := buildEnv(strings.Join(paths, string(os.PathListSeparator)))
+	for k, v := range runtime.ActivationVars(mgr, ver) {
+		env = append(env, k+"="+v)
+	}
+	return env
+}
+
 func buildEnv(binDir string) []string {
 	env := os.Environ()
 	result := make([]string, 0, len(env))

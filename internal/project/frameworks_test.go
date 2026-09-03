@@ -49,6 +49,8 @@ func TestDetectFramework(t *testing.T) {
 		{"gin", map[string]string{"go.mod": "module x\nrequire github.com/gin-gonic/gin v1.10.0"}, "Gin"},
 		{"plain go", map[string]string{"go.mod": "module x"}, "Go"},
 		{"axum", map[string]string{"Cargo.toml": "[dependencies]\naxum = \"0.7\""}, "Axum"},
+		{"kemal", map[string]string{"shard.yml": "name: blog\ndependencies:\n  kemal:\n    github: kemalcr/kemal\n"}, "Kemal"},
+		{"plain crystal", map[string]string{"shard.yml": "name: tool\nversion: 0.1.0\n"}, "Crystal"},
 		{"static", map[string]string{"index.html": "<h1>hi</h1>"}, "Static"},
 		{"empty", map[string]string{"README.md": ""}, ""},
 	}

@@ -1,5 +1,7 @@
 package project
 
+import "strings"
+
 // Starter file sets for frameworks whose official generators are interactive
 // or need several steps. Each returns path → contents; scaffoldFilesThen
 // writes them and runs the dependency install.
@@ -62,6 +64,38 @@ app = Flask(__name__)
 def index():
     return "Hello from Flask on DevBox!"
 `,
+	}
+}
+
+// starterKemal is a minimal Kemal (Crystal) app. Kemal.run reads --bind/--port
+// from ARGV, which is how DevBox's dev-server command hands it the port.
+func starterKemal(name string) map[string]string {
+	shard := strings.ToLower(strings.ReplaceAll(name, "-", "_"))
+	return map[string]string{
+		"shard.yml": `name: ` + shard + `
+version: 0.1.0
+
+targets:
+  ` + shard + `:
+    main: src/` + shard + `.cr
+
+dependencies:
+  kemal:
+    github: kemalcr/kemal
+
+crystal: ">= 1.0.0"
+
+license: MIT
+`,
+		"src/" + shard + ".cr": `require "kemal"
+
+get "/" do
+  "Hello from Kemal on DevBox!"
+end
+
+Kemal.run
+`,
+		".gitignore": "/lib/\n/bin/\n/.shards/\n*.dwarf\n",
 	}
 }
 
