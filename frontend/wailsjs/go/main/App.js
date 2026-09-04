@@ -198,6 +198,10 @@ export function GetPHPIniSettings(arg1) {
   return window['go']['main']['App']['GetPHPIniSettings'](arg1);
 }
 
+export function GetPathEditor() {
+  return window['go']['main']['App']['GetPathEditor']();
+}
+
 export function GetPathHealth() {
   return window['go']['main']['App']['GetPathHealth']();
 }
@@ -454,6 +458,10 @@ export function RefreshAllVersions() {
   return window['go']['main']['App']['RefreshAllVersions']();
 }
 
+export function RefreshPath() {
+  return window['go']['main']['App']['RefreshPath']();
+}
+
 export function RefreshServiceVersions(arg1) {
   return window['go']['main']['App']['RefreshServiceVersions'](arg1);
 }
@@ -488,6 +496,14 @@ export function RestartPHPCGI() {
 
 export function RestartService(arg1) {
   return window['go']['main']['App']['RestartService'](arg1);
+}
+
+export function SaveSystemPath(arg1) {
+  return window['go']['main']['App']['SaveSystemPath'](arg1);
+}
+
+export function SaveUserPath(arg1) {
+  return window['go']['main']['App']['SaveUserPath'](arg1);
 }
 
 export function ScaffoldNewProject(arg1, arg2, arg3, arg4) {

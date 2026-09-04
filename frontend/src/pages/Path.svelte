@@ -6,7 +6,95 @@
   import { appConfig } from '../lib/stores/app';
   import { runtimeCatalog } from '../lib/stores/runtimes';
   import type { RuntimeMeta } from '../lib/stores/runtimes';
-  import { GetPATHEntries, AddToPATH, RemoveFromPATH, GetManagedEnv, GetPathHealth, CleanUserPath, CleanSystemPath, RemoveSystemPathEntry } from '../../wailsjs/go/main/App';
+  import { GetPATHEntries, AddToPATH, RemoveFromPATH, GetManagedEnv, GetPathHealth, CleanUserPath, CleanSystemPath, RemoveSystemPathEntry, GetPathEditor, SaveUserPath, SaveSystemPath, RefreshPath } from '../../wailsjs/go/main/App';
+
+  // --- PATH editor: reorder / delete / add entries in either scope and save ---
+  interface PathEntry { path: string; expanded: string; exists: boolean; managed: boolean }
+  interface PathEditor { supported: boolean; system: PathEntry[]; user: PathEntry[] }
+  let editor: PathEditor | null = null;
+  let editScope: 'user' | 'system' = 'user';
+  let draft: PathEntry[] = [];
+  let original: string = '';
+  let newEntry: string = '';
+  let saving: boolean = false;
+  let refreshing: boolean = false;
+  let editorMessage: string = '';
+  $: dirty = draft.map(d => d.path).join(';') !== original;
+
+  async function loadEditor(keepScope: boolean = true) {
+    try {
+      editor = (await GetPathEditor()) as PathEditor;
+      if (!editor.supported && editScope === 'system') editScope = 'user';
+      setDraft();
+    } catch (e) {
+      console.error('path editor:', e);
+    }
+  }
+  function setDraft() {
+    if (!editor) return;
+    const list = editScope === 'system' ? editor.system : editor.user;
+    draft = list.map(e => ({ ...e }));
+    original = draft.map(d => d.path).join(';');
+    editorMessage = '';
+  }
+  function selectScope(scope: 'user' | 'system') {
+    if (dirty && !confirm($t('path.editorDiscard'))) return;
+    editScope = scope;
+    setDraft();
+  }
+  function move(i: number, delta: number) {
+    const j = i + delta;
+    if (j < 0 || j >= draft.length) return;
+    const next = [...draft];
+    [next[i], next[j]] = [next[j], next[i]];
+    draft = next;
+  }
+  function moveTop(i: number) {
+    if (i === 0) return;
+    const next = [...draft];
+    const [item] = next.splice(i, 1);
+    draft = [item, ...next];
+  }
+  function removeAt(i: number) {
+    draft = draft.filter((_, idx) => idx !== i);
+  }
+  function addDraftEntry() {
+    const p = newEntry.trim();
+    if (!p) return;
+    if (draft.some(d => d.path.toLowerCase().replace(/[\\/]+$/, '') === p.toLowerCase().replace(/[\\/]+$/, ''))) {
+      editorMessage = $t('path.editorDuplicate');
+      return;
+    }
+    draft = [...draft, { path: p, expanded: p, exists: true, managed: false }];
+    newEntry = '';
+  }
+  async function saveDraft() {
+    saving = true;
+    errorMessage = '';
+    editorMessage = '';
+    try {
+      const entries = draft.map(d => d.path);
+      if (editScope === 'system') await SaveSystemPath(entries); else await SaveUserPath(entries);
+      await RefreshPath();
+      editorMessage = $t('path.editorSaved');
+      await Promise.all([loadPATH(), loadHealth(), loadEditor()]);
+    } catch (e) {
+      errorMessage = String(e);
+    }
+    saving = false;
+  }
+  async function refreshPath() {
+    refreshing = true;
+    errorMessage = '';
+    try {
+      await RefreshPath();
+      editorMessage = $t('path.editorRefreshed');
+      await Promise.all([loadPATH(), loadHealth(), loadEditor()]);
+    } catch (e) {
+      errorMessage = String(e);
+    }
+    refreshing = false;
+  }
 
   // PATH health: cmd.exe stops resolving anything once PATH passes 8191
   // characters (Laragon/XAMPP leftovers, duplicated copies, a literal %PATH%).
@@ -159,6 +247,7 @@
     loadPATH();
     loadManagedEnv();
     loadHealth();
+    loadEditor();
     unsubs.push(EventsOn('runtimes:changed', () => { loadPATH(); loadManagedEnv(); }));
     unsubs.push(EventsOn('runtime:installed', () => { loadPATH(); loadManagedEnv(); }));
   });
@@ -350,29 +439,90 @@
     </div>
   </div>
 
-  <!-- System PATH (read-only) -->
-  <div class="card">
-    <div class="mb-4">
-      <h3 class="text-sm font-semibold flex items-center gap-2">
-        <svg class="w-4 h-4 text-surface-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-        </svg>
-        {$t('path.system')}
-        <span class="badge badge-info">{systemEntries.length}</span>
-      </h3>
-      <p class="text-xs text-[var(--color-text-secondary)] mt-1">{$t('path.systemDesc')}</p>
+  <!-- PATH editor: user + system scopes, reorder / delete / add, save -->
+  <div class="card p-5">
+    <div class="flex items-start justify-between gap-4 mb-4">
+      <div>
+        <h3 class="text-base font-bold flex items-center gap-2">
+          <svg class="w-5 h-5 text-primary-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          {$t('path.editorTitle')}
+        </h3>
+        <p class="text-xs text-[var(--color-text-secondary)] mt-1">{$t('path.editorDesc')}</p>
+      </div>
+      <button class="text-xs px-3 py-1.5 rounded-lg font-medium border border-[var(--color-border)] hover:bg-[var(--color-bg)] disabled:opacity-50 shrink-0" on:click={refreshPath} disabled={refreshing} title={$t('path.editorRefreshHint')}>
+        {refreshing ? $t('common.loading') : $t('path.editorRefresh')}
+      </button>
     </div>
 
-    {#if systemEntries.length > 0}
-      <div class="space-y-1 max-h-64 overflow-y-auto">
-        {#each systemEntries as entry}
-          <div class="flex items-center p-2 rounded-lg">
-            <span class="font-mono text-xs text-[var(--color-text-secondary)] truncate">{entry}</span>
+    <div class="flex items-center gap-1 border-b border-[var(--color-border)] mb-3">
+      <button class="px-3 py-2 text-sm font-medium border-b-2 -mb-px {editScope === 'user' ? 'border-primary-500 text-primary-500' : 'border-transparent text-[var(--color-text-secondary)]'}" on:click={() => selectScope('user')}>
+        {$t('path.editorUser')} <span class="text-[10px] text-[var(--color-text-secondary)]">{editor?.user.length ?? 0}</span>
+      </button>
+      {#if editor?.supported}
+        <button class="px-3 py-2 text-sm font-medium border-b-2 -mb-px {editScope === 'system' ? 'border-primary-500 text-primary-500' : 'border-transparent text-[var(--color-text-secondary)]'}" on:click={() => selectScope('system')}>
+          {$t('path.editorSystem')} <span class="text-[10px] text-[var(--color-text-secondary)]">{editor?.system.length ?? 0}</span>
+        </button>
+      {/if}
+      {#if dirty}
+        <span class="ml-auto text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">{$t('path.editorUnsaved')}</span>
+      {/if}
+    </div>
+
+    {#if editScope === 'system'}
+      <p class="text-[11px] text-[var(--color-text-secondary)] mb-2">{$t('path.editorSystemHint')}</p>
+    {/if}
+
+    {#if draft.length > 0}
+      <div class="space-y-1 max-h-[420px] overflow-y-auto pr-1">
+        {#each draft as e, i (e.path + i)}
+          <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg border {e.exists ? 'border-[var(--color-border)]' : 'border-red-500/30 bg-red-500/5'} group">
+            <span class="w-6 text-[10px] text-[var(--color-text-secondary)] font-mono text-right shrink-0">{i + 1}</span>
+            <div class="min-w-0 flex-1">
+              <p class="font-mono text-xs truncate" title={e.expanded}>{e.path}</p>
+              {#if !e.exists}<p class="text-[10px] text-red-500">{$t('path.editorMissing')}</p>{/if}
+            </div>
+            {#if e.managed}<span class="text-[9px] px-1 rounded bg-primary-500/10 text-primary-500 uppercase font-bold shrink-0">DevBox</span>{/if}
+            <div class="flex items-center gap-0.5 shrink-0 opacity-60 group-hover:opacity-100">
+              <button class="btn-icon" on:click={() => moveTop(i)} disabled={i === 0} title={$t('path.editorMoveTop')}>
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>
+              </button>
+              <button class="btn-icon" on:click={() => move(i, -1)} disabled={i === 0} title={$t('path.editorMoveUp')}>
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+              </button>
+              <button class="btn-icon" on:click={() => move(i, 1)} disabled={i === draft.length - 1} title={$t('path.editorMoveDown')}>
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <button class="btn-icon text-red-500 hover:bg-red-500/10" on:click={() => removeAt(i)} title={$t('path.remove')}>
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              </button>
+            </div>
           </div>
         {/each}
       </div>
-    {:else if loading}
-      <p class="text-sm text-[var(--color-text-secondary)] text-center py-4">{$t('common.loading')}</p>
+    {:else}
+      <p class="text-sm text-[var(--color-text-secondary)] text-center py-4">{editor ? $t('path.empty') : $t('common.loading')}</p>
     {/if}
+
+    <div class="flex gap-2 mt-3">
+      <input
+        type="text"
+        bind:value={newEntry}
+        placeholder={$t('path.addCustomPlaceholder')}
+        class="flex-1 px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500/50"
+        on:keydown={(e) => { if (e.key === 'Enter') addDraftEntry(); }}
+      />
+      <button class="text-xs px-3 py-1.5 rounded-lg font-medium border border-[var(--color-border)] hover:bg-[var(--color-bg)]" on:click={addDraftEntry}>{$t('path.add')}</button>
+    </div>
+
+    <div class="flex items-center justify-between mt-4">
+      <p class="text-xs {errorMessage ? 'text-red-500' : 'text-emerald-500'}">{editorMessage}</p>
+      <div class="flex items-center gap-2">
+        <button class="text-xs px-3 py-1.5 rounded-lg font-medium border border-[var(--color-border)] hover:bg-[var(--color-bg)] disabled:opacity-50" on:click={setDraft} disabled={!dirty || saving}>{$t('path.editorReset')}</button>
+        <button class="btn-primary text-xs disabled:opacity-50" on:click={saveDraft} disabled={!dirty || saving} title={editScope === 'system' ? $t('path.editorSaveSystemHint') : ''}>
+          {#if saving}<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-1"></div>{/if}
+          {editScope === 'system' ? $t('path.editorSaveSystem') : $t('path.editorSaveUser')}
+        </button>
+      </div>
+    </div>
   </div>
 </div>

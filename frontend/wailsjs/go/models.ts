@@ -511,6 +511,59 @@ export namespace main {
 
 export namespace pathenv {
 	
+	export class Entry {
+	    path: string;
+	    expanded: string;
+	    exists: boolean;
+	    managed: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Entry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.expanded = source["expanded"];
+	        this.exists = source["exists"];
+	        this.managed = source["managed"];
+	    }
+	}
+	export class Editor {
+	    supported: boolean;
+	    system: Entry[];
+	    user: Entry[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Editor(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.supported = source["supported"];
+	        this.system = this.convertValues(source["system"], Entry);
+	        this.user = this.convertValues(source["user"], Entry);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class Shadow {
 	    tool: string;
 	    expected: string;

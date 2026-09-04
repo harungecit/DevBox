@@ -112,6 +112,8 @@ export function GetPHPIniPath(arg1:string):Promise<string>;
 
 export function GetPHPIniSettings(arg1:string):Promise<Record<string, string>>;
 
+export function GetPathEditor():Promise<pathenv.Editor>;
+
 export function GetPathHealth():Promise<pathenv.Health>;
 
 export function GetPeclExtensions(arg1:string):Promise<Array<runtime.PeclExtension>>;
@@ -240,6 +242,8 @@ export function Quit():Promise<void>;
 
 export function RefreshAllVersions():Promise<void>;
 
+export function RefreshPath():Promise<void>;
+
 export function RefreshServiceVersions(arg1:string):Promise<Array<service.AvailableVersion>>;
 
 export function RegenerateVhosts():Promise<void>;
@@ -257,6 +261,10 @@ export function RemoveVfoxPlugin(arg1:string,arg2:boolean):Promise<void>;
 export function RestartPHPCGI():Promise<void>;
 
 export function RestartService(arg1:string):Promise<void>;
+
+export function SaveSystemPath(arg1:Array<string>):Promise<void>;
+
+export function SaveUserPath(arg1:Array<string>):Promise<void>;
 
 export function ScaffoldNewProject(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 

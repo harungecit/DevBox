@@ -1190,6 +1190,26 @@ func (a *App) RemoveSystemPathEntry(dir string) error {
 	return pathenv.RemoveSystemEntry(dir)
 }
 
+// GetPathEditor returns the raw, ordered entries of both PATH scopes.
+func (a *App) GetPathEditor() pathenv.Editor {
+	return pathenv.GetEditor()
+}
+
+// SaveUserPath replaces the user PATH with the given order.
+func (a *App) SaveUserPath(entries []string) error {
+	return pathenv.SaveUser(entries)
+}
+
+// SaveSystemPath replaces the machine PATH (UAC prompt).
+func (a *App) SaveSystemPath(entries []string) error {
+	return pathenv.SaveSystem(entries)
+}
+
+// RefreshPath broadcasts the environment change and reloads DevBox's own PATH.
+func (a *App) RefreshPath() error {
+	return pathenv.Refresh()
+}
+
 // CleanUserPath removes duplicates, dead directories and %PATH% entries from
 // the user PATH (a backup is written under <data>/backups). Returns the count.
 func (a *App) CleanUserPath() (int, error) {
