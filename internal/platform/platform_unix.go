@@ -338,6 +338,14 @@ func (d *darwinPlatform) OpenFile(path string) error {
 
 // --- Platform naming ---
 
+// GetMachinePATH / SetMachinePATHElevated exist for the Windows-only PATH
+// health feature; POSIX shells assemble PATH from rc files instead.
+func (d *darwinPlatform) GetMachinePATH() ([]string, error) { return nil, nil }
+func (d *darwinPlatform) SetMachinePATHElevated([]string) error {
+	return fmt.Errorf("machine PATH editing is only available on Windows")
+}
+func (d *darwinPlatform) ComSpec() string { return "/bin/sh" }
+
 func (d *darwinPlatform) BinaryName(base string) string { return base }
 func (d *darwinPlatform) ScriptName(base string) string { return base }
 func (d *darwinPlatform) LibExt() string                { return ".so" }

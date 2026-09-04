@@ -13,5 +13,5 @@ func setRawCmdLine(cmd *exec.Cmd, cmdline string) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
-	cmd.SysProcAttr.CmdLine = `cmd /c "` + cmdline + `"`
+	cmd.SysProcAttr.CmdLine = `"` + cmd.Path + `" /c "` + cmdline + `"`
 }

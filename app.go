@@ -1171,6 +1171,25 @@ func (a *App) RemoveFromPATH(dir string) error {
 	return pathenv.RemoveFromPath(dir)
 }
 
+// GetPathHealth diagnoses the PATH: cmd.exe's 8191-character limit,
+// duplicates, dead directories and %PATH% self-references. Past the limit
+// cmd.exe cannot resolve anything on PATH, so .bat wrappers (composer.bat)
+// fail with "'php' is not recognized" although php is installed.
+func (a *App) GetPathHealth() pathenv.Health {
+	return pathenv.Check()
+}
+
+// CleanUserPath removes duplicates, dead directories and %PATH% entries from
+// the user PATH (a backup is written under <data>/backups). Returns the count.
+func (a *App) CleanUserPath() (int, error) {
+	return pathenv.CleanUser()
+}
+
+// CleanSystemPath does the same for the machine PATH via an elevated write (UAC).
+func (a *App) CleanSystemPath() (int, error) {
+	return pathenv.CleanSystem()
+}
+
 // --- Service Detail Info ---
 
 // ConfigFileEntry represents a config file that can be edited

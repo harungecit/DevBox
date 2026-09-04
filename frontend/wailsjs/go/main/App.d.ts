@@ -9,6 +9,7 @@ import {runtime} from '../models';
 import {config} from '../models';
 import {devtools} from '../models';
 import {main} from '../models';
+import {pathenv} from '../models';
 import {vfox} from '../models';
 import {terminal} from '../models';
 import {discovery} from '../models';
@@ -22,6 +23,10 @@ export function CheckForUpdate():Promise<updater.Release>;
 export function CheckPort(arg1:number):Promise<service.PortStatus>;
 
 export function CheckVfoxPluginUpdates():Promise<Record<string, string>>;
+
+export function CleanSystemPath():Promise<number>;
+
+export function CleanUserPath():Promise<number>;
 
 export function CloneGitProject(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -106,6 +111,8 @@ export function GetPHPExtensions(arg1:string):Promise<Array<runtime.PHPExtension
 export function GetPHPIniPath(arg1:string):Promise<string>;
 
 export function GetPHPIniSettings(arg1:string):Promise<Record<string, string>>;
+
+export function GetPathHealth():Promise<pathenv.Health>;
 
 export function GetPeclExtensions(arg1:string):Promise<Array<runtime.PeclExtension>>;
 

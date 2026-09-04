@@ -22,6 +22,14 @@ export function CheckVfoxPluginUpdates() {
   return window['go']['main']['App']['CheckVfoxPluginUpdates']();
 }
 
+export function CleanSystemPath() {
+  return window['go']['main']['App']['CleanSystemPath']();
+}
+
+export function CleanUserPath() {
+  return window['go']['main']['App']['CleanUserPath']();
+}
+
 export function CloneGitProject(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CloneGitProject'](arg1, arg2, arg3, arg4);
 }
@@ -188,6 +196,10 @@ export function GetPHPIniPath(arg1) {
 
 export function GetPHPIniSettings(arg1) {
   return window['go']['main']['App']['GetPHPIniSettings'](arg1);
+}
+
+export function GetPathHealth() {
+  return window['go']['main']['App']['GetPathHealth']();
 }
 
 export function GetPeclExtensions(arg1) {

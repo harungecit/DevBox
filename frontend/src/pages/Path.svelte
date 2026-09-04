@@ -6,7 +6,40 @@
   import { appConfig } from '../lib/stores/app';
   import { runtimeCatalog } from '../lib/stores/runtimes';
   import type { RuntimeMeta } from '../lib/stores/runtimes';
-  import { GetPATHEntries, AddToPATH, RemoveFromPATH, GetManagedEnv } from '../../wailsjs/go/main/App';
+  import { GetPATHEntries, AddToPATH, RemoveFromPATH, GetManagedEnv, GetPathHealth, CleanUserPath, CleanSystemPath } from '../../wailsjs/go/main/App';
+
+  // PATH health: cmd.exe stops resolving anything once PATH passes 8191
+  // characters (Laragon/XAMPP leftovers, duplicated copies, a literal %PATH%).
+  interface PathHealth {
+    supported: boolean; systemEntries: number; systemUnique: number; userEntries: number; userUnique: number;
+    systemLength: number; userLength: number; combinedLength: number; limit: number;
+    tooLong: boolean; literalPath: boolean;
+    systemDuplicates: string[]; systemMissing: string[]; userDuplicates: string[]; userMissing: string[];
+    systemAfter: number; userAfter: number; afterLength: number; issues: number;
+  }
+  let health: PathHealth | null = null;
+  let cleaning: string = '';
+  let cleanMessage: string = '';
+  async function loadHealth() {
+    try {
+      health = (await GetPathHealth()) as PathHealth;
+    } catch (e) {
+      console.error('path health:', e);
+    }
+  }
+  async function cleanPath(scope: 'user' | 'system') {
+    cleaning = scope;
+    cleanMessage = '';
+    errorMessage = '';
+    try {
+      const removed = scope === 'user' ? await CleanUserPath() : await CleanSystemPath();
+      cleanMessage = $t('path.healthCleaned', String(removed));
+      await Promise.all([loadPATH(), loadHealth()]);
+    } catch (e) {
+      errorMessage = String(e);
+    }
+    cleaning = '';
+  }
   import { EventsOn } from '../../wailsjs/runtime/runtime';
 
   // Environment variables DevBox wrote for plugin runtimes (JAVA_HOME…).
@@ -111,6 +144,7 @@
   onMount(() => {
     loadPATH();
     loadManagedEnv();
+    loadHealth();
     unsubs.push(EventsOn('runtimes:changed', () => { loadPATH(); loadManagedEnv(); }));
     unsubs.push(EventsOn('runtime:installed', () => { loadPATH(); loadManagedEnv(); }));
   });
@@ -132,6 +166,45 @@
       <p class="text-sm text-[var(--color-text-secondary)] leading-relaxed">{$t('path.description')}</p>
     </div>
   </div>
+
+  <!-- PATH health -->
+  {#if health && health.supported && (health.issues > 0 || cleanMessage)}
+    <div class="card {health.tooLong ? 'bg-red-500/5 border-red-500/30' : 'bg-amber-500/5 border-amber-500/20'} p-5">
+      <div class="flex items-start justify-between gap-4">
+        <div class="min-w-0">
+          <h3 class="text-base font-bold flex items-center gap-2">
+            <svg class="w-5 h-5 {health.tooLong ? 'text-red-500' : 'text-amber-500'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            {health.tooLong ? $t('path.healthTooLongTitle') : $t('path.healthTitle')}
+          </h3>
+          <p class="text-xs text-[var(--color-text-secondary)] mt-1">
+            {$t('path.healthStats', String(health.combinedLength), String(health.limit), String(health.systemEntries), String(health.systemUnique), String(health.userEntries))}
+          </p>
+          {#if health.tooLong}
+            <p class="text-xs text-red-600 dark:text-red-400 mt-1">{$t('path.healthTooLongDesc')}</p>
+          {/if}
+          <ul class="text-xs text-[var(--color-text-secondary)] mt-2 space-y-0.5 list-disc pl-4">
+            {#if health.literalPath}<li>{$t('path.healthLiteral')}</li>{/if}
+            {#if health.systemDuplicates.length + health.userDuplicates.length > 0}<li>{$t('path.healthDuplicates', String(health.systemDuplicates.length + health.userDuplicates.length))}</li>{/if}
+            {#if health.systemMissing.length + health.userMissing.length > 0}<li>{$t('path.healthMissing', String(health.systemMissing.length + health.userMissing.length))}</li>{/if}
+          </ul>
+          {#if health.issues > 0}
+            <p class="text-xs text-[var(--color-text-secondary)] mt-2">{$t('path.healthAfter', String(health.afterLength), String(health.systemAfter), String(health.userAfter))}</p>
+          {/if}
+          {#if cleanMessage}<p class="text-xs text-emerald-500 mt-2">{cleanMessage}</p>{/if}
+        </div>
+        {#if health.issues > 0}
+          <div class="flex flex-col gap-2 shrink-0">
+            <button class="text-xs px-3 py-1.5 rounded-lg font-medium bg-primary-600 hover:bg-primary-700 text-white shadow-sm disabled:opacity-50" on:click={() => cleanPath('system')} disabled={cleaning !== ''} title={$t('path.healthCleanSystemHint')}>
+              {cleaning === 'system' ? $t('common.loading') : $t('path.healthCleanSystem')}
+            </button>
+            <button class="text-xs px-3 py-1.5 rounded-lg font-medium border border-[var(--color-border)] hover:bg-[var(--color-bg)] disabled:opacity-50" on:click={() => cleanPath('user')} disabled={cleaning !== ''}>
+              {cleaning === 'user' ? $t('common.loading') : $t('path.healthCleanUser')}
+            </button>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
 
   <!-- Error message -->
   {#if errorMessage}

@@ -87,9 +87,9 @@ func (h *Host) runShell(L *lua.LState, cmdline string, _ bool) (int, string) {
 	}
 	var cmd *exec.Cmd
 	if goruntime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd", "/c", cmdline)
+		cmd = exec.CommandContext(ctx, platform.ComSpec(), "/c", cmdline)
 	} else {
-		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", cmdline)
+		cmd = exec.CommandContext(ctx, platform.ComSpec(), "-c", cmdline)
 	}
 	platform.SetProcessAttrs(cmd, true, true)
 	if goruntime.GOOS == "windows" {

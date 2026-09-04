@@ -29,6 +29,14 @@ type Platform interface {
 	GetSystemPATH() ([]string, error)
 	BroadcastPathChange()
 	PathContains(dir string) bool
+	// Machine-level PATH (Windows: HKLM Environment, raw entries); writing
+	// needs elevation and shows a UAC prompt. Unsupported on macOS/Linux.
+	GetMachinePATH() ([]string, error)
+	SetMachinePATHElevated(entries []string) error
+	// ComSpec is the command interpreter to run shell lines with — resolved by
+	// absolute path, because a `cmd` shim earlier on PATH (npm packages do
+	// this) must never shadow the real cmd.exe.
+	ComSpec() string
 
 	// User environment variables other than PATH (JAVA_HOME, GOROOT…) that
 	// plugin runtimes need. Windows: HKCU\Environment + WM_SETTINGCHANGE;
@@ -99,6 +107,9 @@ func RemoveFromPath(dir string) error                 { return current.RemoveFro
 func GetSystemPATH() ([]string, error)                { return current.GetSystemPATH() }
 func BroadcastPathChange()                            { current.BroadcastPathChange() }
 func PathContains(dir string) bool                    { return current.PathContains(dir) }
+func GetMachinePATH() ([]string, error)               { return current.GetMachinePATH() }
+func SetMachinePATHElevated(entries []string) error   { return current.SetMachinePATHElevated(entries) }
+func ComSpec() string                                 { return current.ComSpec() }
 func SetUserEnv(key, value string) error              { return current.SetUserEnv(key, value) }
 func UnsetUserEnv(key string) error                   { return current.UnsetUserEnv(key) }
 func GetUserEnv(key string) (string, bool)            { return current.GetUserEnv(key) }

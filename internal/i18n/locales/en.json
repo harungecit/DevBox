@@ -531,5 +531,17 @@
   "projects.runtimeUnmanaged": "\"{0}\" is not managed by DevBox — add it from the Runtimes page to pin versions.",
   "services.valkeyNoWindows": "Valkey has no Windows build yet (upstream ships Linux/macOS only). Redis is API-compatible and works as a drop-in replacement.",
   "services.notOnThisOS": "not on Windows",
-  "services.useAlternative": "Use {0} instead"
+  "services.useAlternative": "Use {0} instead",
+  "path.healthTitle": "Your PATH could use a cleanup",
+  "path.healthTooLongTitle": "Your PATH is too long for cmd.exe",
+  "path.healthStats": "{0} of {1} characters used · system PATH {2} entries ({3} unique) · user PATH {4} entries",
+  "path.healthTooLongDesc": "Past 8191 characters cmd.exe cannot resolve anything on PATH: 'php' is not recognized in Command Prompt, and .bat wrappers such as composer.bat fail even from PowerShell. Cleaning up fixes this.",
+  "path.healthLiteral": "The system PATH contains a literal %PATH% entry (a self-reference that doubles the string).",
+  "path.healthDuplicates": "{0} duplicate entries",
+  "path.healthMissing": "{0} entries point to folders that no longer exist",
+  "path.healthAfter": "After cleanup: {0} characters — {1} system entries, {2} user entries. Order is kept; a backup goes to DevBox\\backups.",
+  "path.healthCleanSystem": "Clean system PATH (admin)",
+  "path.healthCleanSystemHint": "Removes duplicates, dead folders and %PATH% from the machine PATH. Windows asks for administrator approval.",
+  "path.healthCleanUser": "Clean user PATH",
+  "path.healthCleaned": "Removed {0} entries. Open a new terminal to pick up the change."
 }

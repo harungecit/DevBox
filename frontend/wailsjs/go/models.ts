@@ -509,6 +509,59 @@ export namespace main {
 
 }
 
+export namespace pathenv {
+	
+	export class Health {
+	    supported: boolean;
+	    systemEntries: number;
+	    systemUnique: number;
+	    userEntries: number;
+	    userUnique: number;
+	    systemLength: number;
+	    userLength: number;
+	    combinedLength: number;
+	    limit: number;
+	    tooLong: boolean;
+	    literalPath: boolean;
+	    systemDuplicates: string[];
+	    systemMissing: string[];
+	    userDuplicates: string[];
+	    userMissing: string[];
+	    systemAfter: number;
+	    userAfter: number;
+	    afterLength: number;
+	    issues: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Health(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.supported = source["supported"];
+	        this.systemEntries = source["systemEntries"];
+	        this.systemUnique = source["systemUnique"];
+	        this.userEntries = source["userEntries"];
+	        this.userUnique = source["userUnique"];
+	        this.systemLength = source["systemLength"];
+	        this.userLength = source["userLength"];
+	        this.combinedLength = source["combinedLength"];
+	        this.limit = source["limit"];
+	        this.tooLong = source["tooLong"];
+	        this.literalPath = source["literalPath"];
+	        this.systemDuplicates = source["systemDuplicates"];
+	        this.systemMissing = source["systemMissing"];
+	        this.userDuplicates = source["userDuplicates"];
+	        this.userMissing = source["userMissing"];
+	        this.systemAfter = source["systemAfter"];
+	        this.userAfter = source["userAfter"];
+	        this.afterLength = source["afterLength"];
+	        this.issues = source["issues"];
+	    }
+	}
+
+}
+
 export namespace project {
 	
 	export class EnvHint {

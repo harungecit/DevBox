@@ -107,20 +107,76 @@ func (w *windowsPlatform) RemoveFromPath(dir string) error {
 	return w.SetUserPATH(newEntries)
 }
 
+const machineEnvRegKey = `SYSTEM\CurrentControlSet\Control\Session Manager\Environment`
+
+// GetSystemPATH returns the machine PATH from the registry with %VAR%
+// references expanded. (Asking cmd.exe for %PATH% is exactly what breaks
+// once PATH exceeds cmd's limit, so the registry is read directly.)
 func (w *windowsPlatform) GetSystemPATH() ([]string, error) {
-	out, err := exec.Command("cmd", "/C", "echo", "%PATH%").Output()
+	raw, err := w.GetMachinePATH()
 	if err != nil {
 		return nil, err
 	}
-
 	var entries []string
-	for _, p := range strings.Split(strings.TrimSpace(string(out)), ";") {
-		p = strings.TrimSpace(p)
-		if p != "" {
+	for _, p := range raw {
+		if strings.EqualFold(p, "%PATH%") {
+			continue
+		}
+		if x, err := registry.ExpandString(p); err == nil {
+			p = x
+		}
+		entries = append(entries, p)
+	}
+	return entries, nil
+}
+
+// GetMachinePATH returns the raw machine PATH entries (HKLM, unexpanded).
+func (w *windowsPlatform) GetMachinePATH() ([]string, error) {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, machineEnvRegKey, registry.QUERY_VALUE)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open machine environment key: %w", err)
+	}
+	defer k.Close()
+	val, _, err := k.GetStringValue("Path")
+	if err != nil {
+		return nil, err
+	}
+	var entries []string
+	for _, p := range strings.Split(val, ";") {
+		if p = strings.TrimSpace(p); p != "" {
 			entries = append(entries, p)
 		}
 	}
 	return entries, nil
+}
+
+// SetMachinePATHElevated writes the machine PATH through an elevated reg.exe
+// (UAC prompt) and broadcasts the change. Entries must not contain quotes.
+func (w *windowsPlatform) SetMachinePATHElevated(entries []string) error {
+	val := strings.Join(entries, ";")
+	if strings.ContainsAny(val, "\"") {
+		return fmt.Errorf("PATH entries with quotes are not supported")
+	}
+	regExe := filepath.Join(os.Getenv("SystemRoot"), "System32", "reg.exe")
+	code, err := w.LaunchInstallerWait(regExe, "add", `"HKLM\`+machineEnvRegKey+`"`, "/v", "Path", "/t", "REG_EXPAND_SZ", "/d", `"`+val+`"`, "/f")
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("reg.exe exited with code %d", code)
+	}
+	w.BroadcastPathChange()
+	return nil
+}
+
+// ComSpec returns the real command interpreter by absolute path.
+func (w *windowsPlatform) ComSpec() string {
+	if c := os.Getenv("COMSPEC"); c != "" && strings.HasSuffix(strings.ToLower(c), "cmd.exe") {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
 }
 
 func (w *windowsPlatform) BroadcastPathChange() {
@@ -426,7 +482,7 @@ func (w *windowsPlatform) OpenFolder(path string) error {
 }
 
 func (w *windowsPlatform) OpenFile(path string) error {
-	cmd := exec.Command("cmd", "/c", "start", "", path)
+	cmd := exec.Command(w.ComSpec(), "/c", "start", "", path)
 	return cmd.Start()
 }
 

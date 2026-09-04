@@ -531,5 +531,17 @@
   "projects.runtimeUnmanaged": "\"{0}\" DevBox tarafından yönetilmiyor — sürüm sabitlemek için Çalışma Zamanları sayfasından ekleyin.",
   "services.valkeyNoWindows": "Valkey'in henüz Windows derlemesi yok (yalnızca Linux/macOS yayımlanıyor). Redis API uyumludur ve doğrudan yerine geçer.",
   "services.notOnThisOS": "Windows'ta yok",
-  "services.useAlternative": "Yerine {0} kullan"
+  "services.useAlternative": "Yerine {0} kullan",
+  "path.healthTitle": "PATH'iniz temizlik istiyor",
+  "path.healthTooLongTitle": "PATH'iniz cmd.exe için fazla uzun",
+  "path.healthStats": "{1} karakterin {0}'ı kullanılıyor · sistem PATH {2} girdi ({3} benzersiz) · kullanıcı PATH {4} girdi",
+  "path.healthTooLongDesc": "8191 karakteri aşınca cmd.exe PATH üzerinde hiçbir şeyi bulamaz: Komut İstemi'nde 'php' tanınmaz, composer.bat gibi .bat sarmalayıcılar PowerShell'de bile çalışmaz. Temizlik bunu düzeltir.",
+  "path.healthLiteral": "Sistem PATH'inde düz metin bir %PATH% girdisi var (kendine referans, dizeyi ikiye katlar).",
+  "path.healthDuplicates": "{0} yinelenen girdi",
+  "path.healthMissing": "{0} girdi artık var olmayan klasörleri gösteriyor",
+  "path.healthAfter": "Temizlik sonrası: {0} karakter — {1} sistem girdisi, {2} kullanıcı girdisi. Sıra korunur; yedek DevBox\\backups altına yazılır.",
+  "path.healthCleanSystem": "Sistem PATH'ini temizle (yönetici)",
+  "path.healthCleanSystemHint": "Makine PATH'inden yinelenenleri, silinmiş klasörleri ve %PATH% girdisini kaldırır. Windows yönetici onayı ister.",
+  "path.healthCleanUser": "Kullanıcı PATH'ini temizle",
+  "path.healthCleaned": "{0} girdi kaldırıldı. Değişikliği görmek için yeni bir terminal açın."
 }
