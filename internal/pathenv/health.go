@@ -226,6 +226,15 @@ func analyze(system, user []string, exists func(string) bool) Health {
 	var sysKept, userKept []string
 	h.SystemUnique, h.SystemDuplicates, h.SystemMissing, sysKept = scan(system)
 	h.UserUnique, h.UserDuplicates, h.UserMissing, userKept = scan(user)
+	// Never hand the UI a JSON null where it expects an array — a nil slice
+	// marshals to null and `null.length` aborts Svelte's update loop, which
+	// freezes the whole page.
+	for _, p := range []*[]string{&h.SystemDuplicates, &h.SystemMissing, &h.UserDuplicates, &h.UserMissing} {
+		if *p == nil {
+			*p = []string{}
+		}
+	}
+	h.Shadowed = []Shadow{}
 	h.SystemEntries = len(system)
 	h.UserEntries = len(user)
 	h.SystemLength = len(strings.Join(system, ";"))

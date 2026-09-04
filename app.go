@@ -1210,6 +1210,23 @@ func (a *App) RefreshPath() error {
 	return pathenv.Refresh()
 }
 
+// LogFrontendError records an uncaught JavaScript error or rejected promise
+// from the UI in <data>/logs/frontend.log. Production builds have no DevTools,
+// so this is the only trace a broken page leaves.
+func (a *App) LogFrontendError(kind, message, stack string) {
+	logDir := filepath.Join(config.GetDataDir(), "logs")
+	os.MkdirAll(logDir, 0755)
+	f, err := os.OpenFile(filepath.Join(logDir, "frontend.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	if len(stack) > 4000 {
+		stack = stack[:4000]
+	}
+	fmt.Fprintf(f, "[%s] %s: %s\n%s\n", time.Now().Format("2006-01-02 15:04:05"), kind, message, stack)
+}
+
 // CleanUserPath removes duplicates, dead directories and %PATH% entries from
 // the user PATH (a backup is written under <data>/backups). Returns the count.
 func (a *App) CleanUserPath() (int, error) {

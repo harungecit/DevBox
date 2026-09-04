@@ -124,7 +124,12 @@
   let cleanMessage: string = '';
   async function loadHealth() {
     try {
-      health = (await GetPathHealth()) as PathHealth;
+      const h = (await GetPathHealth()) as PathHealth;
+      // Defensive: Go nil slices arrive as null; a null.length would abort Svelte's update loop.
+      for (const k of ['systemDuplicates', 'systemMissing', 'userDuplicates', 'userMissing', 'shadowed'] as const) {
+        if (!Array.isArray((h as any)[k])) (h as any)[k] = [];
+      }
+      health = h;
     } catch (e) {
       console.error('path health:', e);
     }

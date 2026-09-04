@@ -414,6 +414,10 @@ export function ListTerminals() {
   return window['go']['main']['App']['ListTerminals']();
 }
 
+export function LogFrontendError(arg1, arg2, arg3) {
+  return window['go']['main']['App']['LogFrontendError'](arg1, arg2, arg3);
+}
+
 export function OpenAdminer() {
   return window['go']['main']['App']['OpenAdminer']();
 }

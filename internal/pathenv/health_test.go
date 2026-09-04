@@ -1,6 +1,7 @@
 package pathenv
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -48,6 +49,11 @@ func TestAnalyzeAndClean(t *testing.T) {
 		[]string{`C:\DevBox\runtimes\php\8.4.25`, `C:\DevBox\tools\composer`}, fe)
 	if len(sh) != 1 || sh[0].Tool != "composer" || !sh[0].System || sh[0].Actual != `C:\laragon\bin\composer` {
 		t.Fatalf("shadows: %+v", sh)
+	}
+
+	// JSON must never carry null for the slices the UI reads .length on.
+	if data, _ := json.Marshal(analyze(nil, nil, exists)); strings.Contains(string(data), "null") {
+		t.Fatalf("health JSON contains null: %s", data)
 	}
 
 	cleaned := cleanEntries(system, exists)

@@ -220,6 +220,8 @@ export function ListProjects():Promise<Array<project.Project>>;
 
 export function ListTerminals():Promise<Array<terminal.Terminal>>;
 
+export function LogFrontendError(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function OpenAdminer():Promise<void>;
 
 export function OpenDataDir():Promise<void>;

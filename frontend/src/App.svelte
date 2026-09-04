@@ -4,6 +4,17 @@
   import { currentPage, theme, applyTheme, loadConfig } from './lib/stores/app';
   import { initInstallListeners } from './lib/stores/installs';
   import { initRuntimeCatalog } from './lib/stores/runtimes';
+  import { LogFrontendError } from '../wailsjs/go/main/App';
+
+  // Production builds ship without DevTools, so uncaught errors and rejected
+  // promises are forwarded to <data>/logs/frontend.log.
+  window.addEventListener('error', (e) => {
+    try { LogFrontendError('error', String(e.message || e.error || e), String((e.error && e.error.stack) || `${e.filename}:${e.lineno}:${e.colno}`)); } catch {}
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    const r: any = e.reason;
+    try { LogFrontendError('unhandledrejection', String((r && r.message) || r), String((r && r.stack) || '')); } catch {}
+  });
   import { initI18n } from './lib/i18n/index';
 
   // Attach the global install listeners (runtimes + services) once, at app
