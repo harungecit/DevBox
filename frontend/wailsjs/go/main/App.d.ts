@@ -250,6 +250,8 @@ export function RemoveFromPATH(arg1:string):Promise<void>;
 
 export function RemoveProject(arg1:string):Promise<void>;
 
+export function RemoveSystemPathEntry(arg1:string):Promise<void>;
+
 export function RemoveVfoxPlugin(arg1:string,arg2:boolean):Promise<void>;
 
 export function RestartPHPCGI():Promise<void>;

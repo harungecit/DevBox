@@ -474,6 +474,10 @@ export function RemoveProject(arg1) {
   return window['go']['main']['App']['RemoveProject'](arg1);
 }
 
+export function RemoveSystemPathEntry(arg1) {
+  return window['go']['main']['App']['RemoveSystemPathEntry'](arg1);
+}
+
 export function RemoveVfoxPlugin(arg1, arg2) {
   return window['go']['main']['App']['RemoveVfoxPlugin'](arg1, arg2);
 }

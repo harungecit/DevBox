@@ -543,5 +543,14 @@
   "path.healthCleanSystem": "Clean system PATH (admin)",
   "path.healthCleanSystemHint": "Removes duplicates, dead folders and %PATH% from the machine PATH. Windows asks for administrator approval.",
   "path.healthCleanUser": "Clean user PATH",
-  "path.healthCleaned": "Removed {0} entries. Open a new terminal to pick up the change."
+  "path.healthCleaned": "Removed {0} entries. Open a new terminal to pick up the change.",
+  "path.shadowTitle": "Another installation wins over DevBox",
+  "path.shadowDesc": "Windows resolves the system PATH before the user PATH, so these folders (Laragon, XAMPP, an old install…) are picked instead of DevBox's copies.",
+  "path.shadowExpected": "DevBox's copy: {0}",
+  "path.shadowSystem": "system PATH",
+  "path.shadowUser": "user PATH",
+  "path.shadowRemoveSystem": "Remove from system PATH (admin)",
+  "path.shadowRemoveUser": "Remove from user PATH",
+  "path.shadowRemoveHint": "Only the PATH entry is removed; nothing is deleted from disk.",
+  "path.shadowRemoved": "Removed {0} from PATH. Open a new terminal to pick up the change."
 }

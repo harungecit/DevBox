@@ -44,6 +44,123 @@ type Health struct {
 	UserAfter   int `json:"userAfter"`
 	AfterLength int `json:"afterLength"`
 	Issues      int `json:"issues"`
+
+	// Shadowed lists DevBox-managed tools that another PATH entry wins over
+	// (Windows resolves the machine PATH before the user PATH, so a Laragon
+	// or XAMPP folder in the system PATH beats DevBox's user entries).
+	Shadowed []Shadow `json:"shadowed"`
+}
+
+// Shadow is one tool whose first PATH hit is not the DevBox-managed copy.
+type Shadow struct {
+	Tool     string `json:"tool"`     // "composer", "php"…
+	Expected string `json:"expected"` // DevBox dir that holds the tool
+	Actual   string `json:"actual"`   // dir that currently wins
+	System   bool   `json:"system"`   // Actual lives in the machine PATH
+}
+
+// shadowTools are the executables worth checking; plugin runtimes add theirs.
+var shadowTools = []string{"php", "composer", "node", "npm", "npx", "go", "python", "pip", "cargo", "rustc",
+	"java", "ruby", "deno", "bun", "dart", "kotlinc", "zig", "crystal", "dotnet", "mvn", "gradle", "kubectl", "terraform"}
+
+func hasTool(dir, tool string, exists func(string) bool) bool {
+	for _, ext := range []string{".exe", ".bat", ".cmd"} {
+		if exists(filepath.Join(dir, tool+ext)) {
+			return true
+		}
+	}
+	return false
+}
+
+// findShadows walks system+user PATH in Windows order and reports every
+// managed tool whose first hit is outside the managed dirs.
+func findShadows(system, user, managed []string, exists func(string) bool) []Shadow {
+	isManaged := map[string]bool{}
+	for _, d := range managed {
+		isManaged[strings.ToLower(strings.TrimRight(d, `\/`))] = true
+	}
+	type entry struct {
+		dir    string
+		system bool
+	}
+	var order []entry
+	for _, d := range system {
+		if d = strings.TrimSpace(d); d != "" && !strings.EqualFold(d, "%PATH%") {
+			order = append(order, entry{expandWindowsVars(d), true})
+		}
+	}
+	for _, d := range user {
+		if d = strings.TrimSpace(d); d != "" {
+			order = append(order, entry{expandWindowsVars(d), false})
+		}
+	}
+	var out []Shadow
+	for _, tool := range shadowTools {
+		expected := ""
+		for _, d := range managed {
+			if hasTool(d, tool, exists) {
+				expected = d
+				break
+			}
+		}
+		if expected == "" {
+			continue
+		}
+		for _, e := range order {
+			if !hasTool(e.dir, tool, exists) {
+				continue
+			}
+			if !isManaged[strings.ToLower(strings.TrimRight(e.dir, `\/`))] {
+				out = append(out, Shadow{Tool: tool, Expected: expected, Actual: e.dir, System: e.system})
+			}
+			break
+		}
+	}
+	return out
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
+}
+
+// CheckWith is Check plus the shadow analysis for the given managed dirs.
+func CheckWith(managed []string) Health {
+	h := Check()
+	if !h.Supported {
+		return h
+	}
+	system, _ := platform.GetMachinePATH()
+	user, _ := platform.GetUserPATH()
+	h.Shadowed = findShadows(system, user, managed, fileExists)
+	if len(h.Shadowed) > 0 {
+		h.Issues++
+	}
+	if h.Shadowed == nil {
+		h.Shadowed = []Shadow{}
+	}
+	return h
+}
+
+// RemoveSystemEntry drops one directory from the machine PATH (elevated).
+func RemoveSystemEntry(dir string) error {
+	entries, err := platform.GetMachinePATH()
+	if err != nil {
+		return err
+	}
+	var kept []string
+	norm := strings.ToLower(strings.TrimRight(strings.TrimSpace(dir), `\/`))
+	for _, e := range entries {
+		if strings.ToLower(strings.TrimRight(strings.TrimSpace(e), `\/`)) == norm {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if len(kept) == len(entries) {
+		return nil
+	}
+	backup("system", entries)
+	return platform.SetMachinePATHElevated(kept)
 }
 
 func dirExists(p string) bool {

@@ -543,5 +543,14 @@
   "path.healthCleanSystem": "Sistem PATH'ini temizle (yönetici)",
   "path.healthCleanSystemHint": "Makine PATH'inden yinelenenleri, silinmiş klasörleri ve %PATH% girdisini kaldırır. Windows yönetici onayı ister.",
   "path.healthCleanUser": "Kullanıcı PATH'ini temizle",
-  "path.healthCleaned": "{0} girdi kaldırıldı. Değişikliği görmek için yeni bir terminal açın."
+  "path.healthCleaned": "{0} girdi kaldırıldı. Değişikliği görmek için yeni bir terminal açın.",
+  "path.shadowTitle": "Başka bir kurulum DevBox'ın önüne geçiyor",
+  "path.shadowDesc": "Windows sistem PATH'ini kullanıcı PATH'inden önce çözer; bu klasörler (Laragon, XAMPP, eski bir kurulum…) DevBox'ın kopyaları yerine seçiliyor.",
+  "path.shadowExpected": "DevBox'ın kopyası: {0}",
+  "path.shadowSystem": "sistem PATH",
+  "path.shadowUser": "kullanıcı PATH",
+  "path.shadowRemoveSystem": "Sistem PATH'inden kaldır (yönetici)",
+  "path.shadowRemoveUser": "Kullanıcı PATH'inden kaldır",
+  "path.shadowRemoveHint": "Yalnızca PATH girdisi kaldırılır; diskten hiçbir şey silinmez.",
+  "path.shadowRemoved": "{0} PATH'ten kaldırıldı. Değişikliği görmek için yeni bir terminal açın."
 }

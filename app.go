@@ -1176,7 +1176,18 @@ func (a *App) RemoveFromPATH(dir string) error {
 // cmd.exe cannot resolve anything on PATH, so .bat wrappers (composer.bat)
 // fail with "'php' is not recognized" although php is installed.
 func (a *App) GetPathHealth() pathenv.Health {
-	return pathenv.Check()
+	managed := runtime.ManagedPathDirs()
+	tools := filepath.Join(config.GetDataDir(), "tools")
+	for _, sub := range []string{"composer", "bun", "uv", "gobin", filepath.Join("cargo", "bin"), "mkcert", "cloudflared"} {
+		managed = append(managed, filepath.Join(tools, sub))
+	}
+	return pathenv.CheckWith(managed)
+}
+
+// RemoveSystemPathEntry drops a directory from the machine PATH (UAC prompt) —
+// used to stop a Laragon/XAMPP folder from shadowing DevBox's tools.
+func (a *App) RemoveSystemPathEntry(dir string) error {
+	return pathenv.RemoveSystemEntry(dir)
 }
 
 // CleanUserPath removes duplicates, dead directories and %PATH% entries from

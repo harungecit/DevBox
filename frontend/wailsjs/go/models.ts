@@ -511,6 +511,24 @@ export namespace main {
 
 export namespace pathenv {
 	
+	export class Shadow {
+	    tool: string;
+	    expected: string;
+	    actual: string;
+	    system: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Shadow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tool = source["tool"];
+	        this.expected = source["expected"];
+	        this.actual = source["actual"];
+	        this.system = source["system"];
+	    }
+	}
 	export class Health {
 	    supported: boolean;
 	    systemEntries: number;
@@ -531,6 +549,7 @@ export namespace pathenv {
 	    userAfter: number;
 	    afterLength: number;
 	    issues: number;
+	    shadowed: Shadow[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Health(source);
@@ -557,7 +576,26 @@ export namespace pathenv {
 	        this.userAfter = source["userAfter"];
 	        this.afterLength = source["afterLength"];
 	        this.issues = source["issues"];
+	        this.shadowed = this.convertValues(source["shadowed"], Shadow);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

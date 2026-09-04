@@ -562,26 +562,38 @@ func TogglePHPExtension(version, extName string, enable bool) error {
 	lines := strings.Split(string(data), "\n")
 	found := false
 	// Matches `extension=NAME`, `zend_extension=NAME`, with optional `;`,
-	// optional php_ prefix / .dll / .so suffix, exactly this extension.
-	re := regexp.MustCompile(`^\s*;?\s*(zend_)?extension\s*=\s*"?(php_)?` + regexp.QuoteMeta(extName) + `(\.dll|\.so)?"?\s*$`)
+	// optional php_ prefix / .dll / .so suffix, exactly this extension, and an
+	// optional trailing comment (the stock ini has `extension=exif ; Must be
+	// after mbstring…`; missing that comment is how duplicates used to get
+	// appended at the end of the file).
+	re := regexp.MustCompile(`^\s*;?\s*(zend_)?extension\s*=\s*"?(php_)?` + regexp.QuoteMeta(extName) + `(\.dll|\.so)?"?\s*(;.*)?$`)
 
-	for i, line := range lines {
+	var kept []string
+	for _, line := range lines {
 		if !re.MatchString(line) {
+			kept = append(kept, line)
 			continue
 		}
+		if found {
+			continue // a duplicate directive: drop it
+		}
 		found = true
-		original := strings.TrimLeft(strings.TrimSpace(line), "; \t")
+		trimmed := strings.TrimLeft(strings.TrimSpace(line), "; \t")
+		directive, comment := trimmed, ""
+		if i := strings.Index(trimmed, ";"); i > 0 {
+			directive, comment = strings.TrimSpace(trimmed[:i]), " "+trimmed[i:]
+		}
 		// Correct the directive kind in case an older DevBox wrote `extension=opcache`.
-		if zendExtensions[extName] && !strings.HasPrefix(original, "zend_") {
-			original = "zend_" + original
+		if zendExtensions[extName] && !strings.HasPrefix(directive, "zend_") {
+			directive = "zend_" + directive
 		}
 		if enable {
-			lines[i] = original
+			kept = append(kept, directive+comment)
 		} else {
-			lines[i] = ";" + original
+			kept = append(kept, ";"+directive+comment)
 		}
-		// Don't break: duplicates (e.g. an appended line) are normalised too.
 	}
+	lines = kept
 
 	if !found && enable {
 		lines = append(lines, extDirective(extName)+extName)

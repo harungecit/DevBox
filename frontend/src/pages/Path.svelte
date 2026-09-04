@@ -6,7 +6,7 @@
   import { appConfig } from '../lib/stores/app';
   import { runtimeCatalog } from '../lib/stores/runtimes';
   import type { RuntimeMeta } from '../lib/stores/runtimes';
-  import { GetPATHEntries, AddToPATH, RemoveFromPATH, GetManagedEnv, GetPathHealth, CleanUserPath, CleanSystemPath } from '../../wailsjs/go/main/App';
+  import { GetPATHEntries, AddToPATH, RemoveFromPATH, GetManagedEnv, GetPathHealth, CleanUserPath, CleanSystemPath, RemoveSystemPathEntry } from '../../wailsjs/go/main/App';
 
   // PATH health: cmd.exe stops resolving anything once PATH passes 8191
   // characters (Laragon/XAMPP leftovers, duplicated copies, a literal %PATH%).
@@ -16,6 +16,20 @@
     tooLong: boolean; literalPath: boolean;
     systemDuplicates: string[]; systemMissing: string[]; userDuplicates: string[]; userMissing: string[];
     systemAfter: number; userAfter: number; afterLength: number; issues: number;
+    shadowed: { tool: string; expected: string; actual: string; system: boolean }[];
+  }
+  let unshadowing: string = '';
+  async function unshadow(dir: string, system: boolean) {
+    unshadowing = dir;
+    errorMessage = '';
+    try {
+      if (system) await RemoveSystemPathEntry(dir); else await RemoveFromPATH(dir);
+      cleanMessage = $t('path.shadowRemoved', dir);
+      await Promise.all([loadPATH(), loadHealth()]);
+    } catch (e) {
+      errorMessage = String(e);
+    }
+    unshadowing = '';
   }
   let health: PathHealth | null = null;
   let cleaning: string = '';
@@ -187,12 +201,34 @@
             {#if health.systemDuplicates.length + health.userDuplicates.length > 0}<li>{$t('path.healthDuplicates', String(health.systemDuplicates.length + health.userDuplicates.length))}</li>{/if}
             {#if health.systemMissing.length + health.userMissing.length > 0}<li>{$t('path.healthMissing', String(health.systemMissing.length + health.userMissing.length))}</li>{/if}
           </ul>
-          {#if health.issues > 0}
+          {#if health.tooLong || health.literalPath || health.systemDuplicates.length + health.userDuplicates.length + health.systemMissing.length + health.userMissing.length > 0}
             <p class="text-xs text-[var(--color-text-secondary)] mt-2">{$t('path.healthAfter', String(health.afterLength), String(health.systemAfter), String(health.userAfter))}</p>
+          {/if}
+          {#if health.shadowed && health.shadowed.length > 0}
+            <div class="mt-3 pt-3 border-t border-[var(--color-border)]">
+              <p class="text-xs font-bold mb-1">{$t('path.shadowTitle')}</p>
+              <p class="text-[11px] text-[var(--color-text-secondary)] mb-2">{$t('path.shadowDesc')}</p>
+              <div class="space-y-1.5">
+                {#each health.shadowed as s (s.tool + s.actual)}
+                  <div class="flex items-center justify-between gap-3 text-[11px] px-2.5 py-1.5 rounded-lg bg-[var(--color-bg)] border border-[var(--color-border)]">
+                    <div class="min-w-0">
+                      <span class="font-mono font-bold">{s.tool}</span>
+                      <span class="text-[var(--color-text-secondary)]"> → </span>
+                      <span class="font-mono truncate" title={s.actual}>{s.actual}</span>
+                      <span class="text-[9px] px-1 ml-1 rounded bg-slate-500/10 text-slate-500 uppercase font-bold">{s.system ? $t('path.shadowSystem') : $t('path.shadowUser')}</span>
+                      <p class="text-[10px] text-[var(--color-text-secondary)] truncate" title={s.expected}>{$t('path.shadowExpected', s.expected)}</p>
+                    </div>
+                    <button class="text-[10px] px-2 py-1 rounded-lg text-red-500 border border-red-500/20 hover:bg-red-500/10 shrink-0 disabled:opacity-50" on:click={() => unshadow(s.actual, s.system)} disabled={unshadowing !== ''} title={$t('path.shadowRemoveHint')}>
+                      {unshadowing === s.actual ? $t('common.loading') : (s.system ? $t('path.shadowRemoveSystem') : $t('path.shadowRemoveUser'))}
+                    </button>
+                  </div>
+                {/each}
+              </div>
+            </div>
           {/if}
           {#if cleanMessage}<p class="text-xs text-emerald-500 mt-2">{cleanMessage}</p>{/if}
         </div>
-        {#if health.issues > 0}
+        {#if health.tooLong || health.literalPath || health.systemDuplicates.length + health.userDuplicates.length + health.systemMissing.length + health.userMissing.length > 0}
           <div class="flex flex-col gap-2 shrink-0">
             <button class="text-xs px-3 py-1.5 rounded-lg font-medium bg-primary-600 hover:bg-primary-700 text-white shadow-sm disabled:opacity-50" on:click={() => cleanPath('system')} disabled={cleaning !== ''} title={$t('path.healthCleanSystemHint')}>
               {cleaning === 'system' ? $t('common.loading') : $t('path.healthCleanSystem')}

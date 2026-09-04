@@ -37,6 +37,19 @@ func TestAnalyzeAndClean(t *testing.T) {
 		t.Fatal("long PATH not flagged")
 	}
 
+	// Shadowing: composer in a system-PATH Laragon dir beats DevBox's user entry.
+	files := map[string]bool{
+		`C:\laragon\bin\composer\composer.bat`: true,
+		`C:\DevBox\tools\composer\composer.bat`: true,
+		`C:\DevBox\runtimes\php\8.4.25\php.exe`: true,
+	}
+	fe := func(p string) bool { return files[p] }
+	sh := findShadows([]string{`C:\Windows`, `C:\laragon\bin\composer`}, []string{`C:\DevBox\tools\composer`, `C:\DevBox\runtimes\php\8.4.25`},
+		[]string{`C:\DevBox\runtimes\php\8.4.25`, `C:\DevBox\tools\composer`}, fe)
+	if len(sh) != 1 || sh[0].Tool != "composer" || !sh[0].System || sh[0].Actual != `C:\laragon\bin\composer` {
+		t.Fatalf("shadows: %+v", sh)
+	}
+
 	cleaned := cleanEntries(system, exists)
 	want := []string{`C:\Windows\system32`, `C:\Windows`, `C:\tools\bin`}
 	if strings.Join(cleaned, ";") != strings.Join(want, ";") {
